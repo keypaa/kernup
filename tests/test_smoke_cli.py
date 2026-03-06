@@ -74,6 +74,7 @@ def test_profile_dry_run_writes_artifacts_and_export() -> None:
         assert (run_dir / "kernup.db").exists()
         assert (run_dir / "kernup.log").exists()
         assert (run_dir / "profile.json").exists()
+        assert (run_dir / "results_export.json").exists()
 
 
 def test_storage_roundtrip_in_memory() -> None:

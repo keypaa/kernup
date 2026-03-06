@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from dataclasses import asdict
 from uuid import uuid4
 
 import click
 
 from kernup.config.schema import AppConfig
 from kernup.errors import UserError
+from kernup.profiler import detect_hardware, run_baseline, run_breakdown
 from kernup.storage.db import ResultRecord, RunRecord, create_schema, insert_result, insert_run, open_connection
 from kernup.storage.export import export_results_json
 from kernup.utils.gpu import ensure_gpu_available
@@ -48,6 +51,10 @@ def profile_command(
     click.echo(gpu_status.reason)
 
     if dry_run:
+        gpu_profile = detect_hardware(gpu_status)
+        baseline_summary = run_baseline(dry_run=True)
+        breakdown_summary = run_breakdown(dry_run=True)
+
         artifacts = create_run_artifacts(output)
         now_iso = datetime.now().astimezone().isoformat()
         run_record = RunRecord(
@@ -77,7 +84,7 @@ def profile_command(
             insert_run(conn, run_record)
             insert_result(conn, result_record)
             if export:
-                export_results_json(conn, artifacts.run_id, artifacts.profile_path)
+                export_results_json(conn, artifacts.run_id, artifacts.run_dir / "results_export.json")
 
         artifacts.log_path.write_text(
             "KERNUP dry-run log\n"
@@ -89,11 +96,24 @@ def profile_command(
             encoding="utf-8",
         )
 
+        profile_payload = {
+            "run_id": artifacts.run_id,
+            "timestamp": now_iso,
+            "model": hf_model,
+            "device": cfg.device,
+            "dry_run": dry_run,
+            "gpu": asdict(gpu_profile),
+            "baseline": baseline_summary.to_dict(),
+            "breakdown": {"bottlenecks": breakdown_summary.bottlenecks},
+        }
+        artifacts.profile_path.write_text(json.dumps(profile_payload, indent=2), encoding="utf-8")
+
         click.echo(f"Run ID: {artifacts.run_id}")
         click.echo(f"Run dir: {artifacts.run_dir}")
         click.echo(f"Database: {artifacts.db_path}")
+        click.echo(f"Profile: {artifacts.profile_path}")
         if export:
-            click.echo(f"Export: {artifacts.profile_path}")
+            click.echo(f"Export: {artifacts.run_dir / 'results_export.json'}")
         click.echo("Dry-run complete: configuration and environment checks passed.")
         return
 

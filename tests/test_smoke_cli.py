@@ -14,6 +14,8 @@ def test_cli_help_shows_profile_command() -> None:
     assert result.exit_code == 0
     assert "profile" in result.output
     assert "optimize" in result.output
+    assert "patch" in result.output
+    assert "bench" in result.output
 
 
 def test_profile_dry_run_with_gpu_bypass_succeeds() -> None:
@@ -221,3 +223,83 @@ def test_status_and_clean_commands() -> None:
         assert clean.exit_code == 0
         assert "Removed 1 run(s)" in clean.output
         assert not clean_run_dir.exists()
+
+
+def test_patch_and_bench_commands() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        run_dir = Path("kernup_results") / "run_20260306_000003_xyz987"
+        run_dir.mkdir(parents=True)
+        db_path = run_dir / "kernup.db"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE runs (
+                    id TEXT PRIMARY KEY,
+                    timestamp TEXT,
+                    generation INTEGER,
+                    block_size INTEGER,
+                    num_warps INTEGER,
+                    num_stages INTEGER,
+                    kv_strategy TEXT,
+                    split_k INTEGER,
+                    mutation_type TEXT
+                );
+                CREATE TABLE results (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    tok_s REAL,
+                    ttft_ms REAL,
+                    latency_ms REAL,
+                    vram_used_gb REAL,
+                    is_best INTEGER,
+                    notes TEXT
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO results (id, run_id, tok_s, ttft_ms, latency_ms, vram_used_gb, is_best, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid4()), "run_20260306_000003_xyz987", 33.3, 99.0, 44.0, 7.1, 1, "best"),
+            )
+            conn.commit()
+
+        patch_result = runner.invoke(
+            cli,
+            [
+                "patch",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--results",
+                "./kernup_results",
+                "--format",
+                "simple",
+                "--output",
+                "./patch_out",
+            ],
+        )
+        assert patch_result.exit_code == 0
+        assert "Patch file:" in patch_result.output
+        assert (Path("patch_out") / "patch_simple.py").exists()
+
+        bench_result = runner.invoke(
+            cli,
+            [
+                "bench",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--results",
+                "./kernup_results",
+                "--export",
+                "--output",
+                "./bench_out",
+            ],
+        )
+        assert bench_result.exit_code == 0
+        assert "Best tok/s: 33.300" in bench_result.output
+        assert "Export:" in bench_result.output
+        bench_exports = list(Path("bench_out").glob("bench_run_20260306_000003_xyz987.json"))
+        assert len(bench_exports) == 1

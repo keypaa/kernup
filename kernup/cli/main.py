@@ -5,7 +5,9 @@ from __future__ import annotations
 import click
 
 from kernup import __version__
+from kernup.cli.bench import bench_command
 from kernup.cli.optimize import optimize_command
+from kernup.cli.patch import patch_command
 from kernup.cli.profile import profile_command
 from kernup.cli.status import clean_command, status_command
 
@@ -18,6 +20,8 @@ def cli() -> None:
 
 cli.add_command(profile_command)
 cli.add_command(optimize_command)
+cli.add_command(patch_command)
+cli.add_command(bench_command)
 cli.add_command(status_command)
 cli.add_command(clean_command)
 

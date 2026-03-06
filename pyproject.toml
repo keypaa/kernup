@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "kernup"
 version = "0.1.0"
 description = "Automatic kernel optimization for HuggingFace transformers"
-readme = "kernup_master_plan.md"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [

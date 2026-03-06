@@ -2,6 +2,19 @@
 
 This roadmap turns the master plan into an execution sequence with clear outputs and done criteria.
 
+## Completion Status (2026-03-06)
+- Milestone 0: complete
+- Milestone 1: complete
+- Milestone 2: complete (dry-run first)
+- Milestone 3: complete (dry-run first)
+- Milestone 4: complete
+- Milestone 5: complete (dry-run first)
+- Milestone 6: complete (dry-run first)
+- Milestone 7: complete
+- Milestone 8: complete
+
+Current implementation is production-structured and testable with CPU-only dry-run flows on Windows. Real GPU execution paths remain intentionally scaffolded for subsequent implementation.
+
 ## Guiding Principles
 - Keep the repository runnable at every step.
 - Prefer small vertical slices over large unfinished modules.

@@ -11,6 +11,7 @@ import click
 
 from kernup.errors import UserError
 from kernup.phase1.search import run_phase1_search
+from kernup.phase2.pipeline import run_phase2_validation_pipeline
 from kernup.storage.db import ResultRecord, RunRecord, create_schema, insert_result, insert_run, open_connection
 from kernup.utils.gpu import ensure_gpu_available
 from kernup.utils.runs import create_run_artifacts
@@ -50,9 +51,6 @@ def optimize_command(
     allow_no_gpu: bool,
 ) -> None:
     """Optimize a model using phase 1 search (dry-run supported)."""
-    if phase == "2":
-        raise click.ClickException("Phase 2 is not implemented yet.")
-
     if not dry_run:
         raise click.ClickException(
             "Full optimization is not implemented yet. Use --dry-run during bootstrap."
@@ -70,6 +68,96 @@ def optimize_command(
     click.echo(f"Model: {hf_model}")
     click.echo(f"Target: {target}")
     click.echo(gpu_status.reason)
+
+    if phase == "2":
+        click.echo("Running phase 2 dry-run validation pipeline...")
+        candidate_kernel = "def kernel(x):\n    return x\n"
+        result = run_phase2_validation_pipeline(
+            kernel_code=candidate_kernel,
+            target=target,
+            dry_run=True,
+            max_healing_attempts=3,
+        )
+
+        with open_connection(artifacts.db_path) as conn:
+            create_schema(conn)
+            run_record = RunRecord(
+                id=artifacts.run_id,
+                timestamp=now_iso,
+                generation=0,
+                block_size=0,
+                num_warps=0,
+                num_stages=0,
+                kv_strategy="n/a",
+                split_k=0,
+                mutation_type="phase2",
+            )
+            insert_run(conn, run_record)
+
+            if result.benchmark is None:
+                tok_s = 0.0
+                latency_ms = 0.0
+                ttft_ms = 0.0
+                vram_used_gb = 0.0
+                notes = "phase2_failed_before_benchmark"
+            else:
+                tok_s = result.benchmark.tok_s
+                latency_ms = result.benchmark.latency_ms
+                ttft_ms = result.benchmark.ttft_ms
+                vram_used_gb = result.benchmark.vram_used_gb
+                notes = f"phase2_dry_run_healed_attempts={result.healed_attempts}"
+
+            insert_result(
+                conn,
+                ResultRecord(
+                    id=str(uuid4()),
+                    run_id=artifacts.run_id,
+                    tok_s=tok_s,
+                    ttft_ms=ttft_ms,
+                    latency_ms=latency_ms,
+                    vram_used_gb=vram_used_gb,
+                    is_best=1,
+                    notes=notes,
+                ),
+            )
+
+        artifacts.log_path.write_text(
+            "KERNUP optimize phase2 dry-run log\n"
+            f"timestamp={now_iso}\n"
+            f"run_id={artifacts.run_id}\n"
+            f"model={hf_model}\n"
+            f"target={target}\n"
+            f"static_ok={result.static.ok}\n"
+            f"numerical_ok={result.numerical.ok if result.numerical else False}\n"
+            f"benchmark_ok={result.benchmark.ok if result.benchmark else False}\n"
+            f"healed_attempts={result.healed_attempts}\n",
+            encoding="utf-8",
+        )
+
+        phase2_path = artifacts.run_dir / "phase2_validation.json"
+        phase2_payload = {
+            "static_ok": result.static.ok,
+            "static_error": result.static.error_message,
+            "numerical_ok": result.numerical.ok if result.numerical else False,
+            "benchmark": {
+                "tok_s": result.benchmark.tok_s if result.benchmark else 0.0,
+                "latency_ms": result.benchmark.latency_ms if result.benchmark else 0.0,
+                "ttft_ms": result.benchmark.ttft_ms if result.benchmark else 0.0,
+                "vram_used_gb": result.benchmark.vram_used_gb if result.benchmark else 0.0,
+            },
+            "healed_attempts": result.healed_attempts,
+        }
+        phase2_path.write_text(json.dumps(phase2_payload, indent=2), encoding="utf-8")
+
+        click.echo(f"Run ID: {artifacts.run_id}")
+        click.echo(f"Run dir: {artifacts.run_dir}")
+        click.echo(f"Static gate: {result.static.ok}")
+        click.echo(f"Numerical gate: {result.numerical.ok if result.numerical else False}")
+        click.echo(f"Benchmark gate: {result.benchmark.ok if result.benchmark else False}")
+        click.echo(f"Validation artifact: {phase2_path}")
+        click.echo("Phase 2 dry-run complete.")
+        return
+
     click.echo("Running phase 1 dry-run search...")
 
     result = run_phase1_search(

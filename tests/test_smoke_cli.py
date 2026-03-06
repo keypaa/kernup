@@ -143,15 +143,27 @@ def test_optimize_phase1_dry_run_succeeds() -> None:
         assert "Best tok/s:" in result.output
 
 
-def test_optimize_phase2_not_implemented() -> None:
+def test_optimize_phase2_dry_run_succeeds() -> None:
     runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["optimize", "--hf", "Qwen/Qwen2.5-7B", "--phase", "2", "--dry-run"],
-    )
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "optimize",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--phase",
+                "2",
+                "--dry-run",
+                "--allow-no-gpu",
+                "--output",
+                "./kernup_results",
+            ],
+        )
 
-    assert result.exit_code != 0
-    assert "Phase 2 is not implemented yet" in result.output
+        assert result.exit_code == 0
+        assert "Phase 2 dry-run complete" in result.output
+        assert "Validation artifact:" in result.output
 
 
 def test_status_and_clean_commands() -> None:

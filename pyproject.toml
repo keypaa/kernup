@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kernup"
+version = "0.1.0"
+description = "Automatic kernel optimization for HuggingFace transformers"
+readme = "kernup_master_plan.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Keylhan Paumard--Andre", email = "paumardkeylhan@gmail.com" }
+]
+dependencies = [
+  "click>=8.1,<9.0",
+  "rich>=13.0,<15.0"
+]
+
+[project.optional-dependencies]
+gpu = [
+  "torch>=2.6",
+  "triton>=3.1,<4.0",
+  "transformers>=4.40",
+  "matplotlib>=3.8",
+  "optuna>=3.6"
+]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0"
+]
+
+[project.scripts]
+kernup = "kernup.cli.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["kernup*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

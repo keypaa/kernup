@@ -163,7 +163,8 @@ def test_optimize_phase2_dry_run_succeeds() -> None:
 
         assert result.exit_code == 0
         assert "Phase 2 dry-run complete" in result.output
-        assert "Validation artifact:" in result.output
+        assert "Evolution artifact:" in result.output
+        assert "Best tok/s:" in result.output
 
 
 def test_status_and_clean_commands() -> None:

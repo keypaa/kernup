@@ -11,7 +11,7 @@ import click
 
 from kernup.errors import UserError
 from kernup.phase1.search import run_phase1_search
-from kernup.phase2.pipeline import run_phase2_validation_pipeline
+from kernup.phase2.evolution import run_phase2_evolution
 from kernup.storage.db import ResultRecord, RunRecord, create_schema, insert_result, insert_run, open_connection
 from kernup.utils.gpu import ensure_gpu_available
 from kernup.utils.runs import create_run_artifacts
@@ -70,10 +70,12 @@ def optimize_command(
     click.echo(gpu_status.reason)
 
     if phase == "2":
-        click.echo("Running phase 2 dry-run validation pipeline...")
-        candidate_kernel = "def kernel(x):\n    return x\n"
-        result = run_phase2_validation_pipeline(
-            kernel_code=candidate_kernel,
+        click.echo("Running phase 2 dry-run evolution loop...")
+        result = run_phase2_evolution(
+            iterations=iterations,
+            population=population,
+            plateau_window=plateau_window,
+            plateau_threshold=plateau_threshold,
             target=target,
             dry_run=True,
             max_healing_attempts=3,
@@ -84,77 +86,75 @@ def optimize_command(
             run_record = RunRecord(
                 id=artifacts.run_id,
                 timestamp=now_iso,
-                generation=0,
+                generation=len(result.history_best_tok_s) - 1,
                 block_size=0,
                 num_warps=0,
                 num_stages=0,
                 kv_strategy="n/a",
                 split_k=0,
-                mutation_type="phase2",
+                mutation_type="phase2-evolution",
             )
             insert_run(conn, run_record)
 
-            if result.benchmark is None:
-                tok_s = 0.0
-                latency_ms = 0.0
-                ttft_ms = 0.0
-                vram_used_gb = 0.0
-                notes = "phase2_failed_before_benchmark"
-            else:
-                tok_s = result.benchmark.tok_s
-                latency_ms = result.benchmark.latency_ms
-                ttft_ms = result.benchmark.ttft_ms
-                vram_used_gb = result.benchmark.vram_used_gb
-                notes = f"phase2_dry_run_healed_attempts={result.healed_attempts}"
-
-            insert_result(
-                conn,
-                ResultRecord(
-                    id=str(uuid4()),
-                    run_id=artifacts.run_id,
-                    tok_s=tok_s,
-                    ttft_ms=ttft_ms,
-                    latency_ms=latency_ms,
-                    vram_used_gb=vram_used_gb,
-                    is_best=1,
-                    notes=notes,
-                ),
-            )
+            for evaluation in result.evaluations:
+                bench = evaluation.pipeline.benchmark
+                insert_result(
+                    conn,
+                    ResultRecord(
+                        id=str(uuid4()),
+                        run_id=artifacts.run_id,
+                        tok_s=bench.tok_s if bench else 0.0,
+                        ttft_ms=bench.ttft_ms if bench else 0.0,
+                        latency_ms=bench.latency_ms if bench else 0.0,
+                        vram_used_gb=bench.vram_used_gb if bench else 0.0,
+                        is_best=1 if evaluation == result.best else 0,
+                        notes=(
+                            f"phase2_gen={evaluation.generation};"
+                            f"mutation={evaluation.mutation_type};"
+                            f"heals={evaluation.pipeline.healed_attempts}"
+                        ),
+                    ),
+                )
 
         artifacts.log_path.write_text(
-            "KERNUP optimize phase2 dry-run log\n"
+            "KERNUP optimize phase2 dry-run evolution log\n"
             f"timestamp={now_iso}\n"
             f"run_id={artifacts.run_id}\n"
             f"model={hf_model}\n"
             f"target={target}\n"
-            f"static_ok={result.static.ok}\n"
-            f"numerical_ok={result.numerical.ok if result.numerical else False}\n"
-            f"benchmark_ok={result.benchmark.ok if result.benchmark else False}\n"
-            f"healed_attempts={result.healed_attempts}\n",
+            f"iterations={iterations}\n"
+            f"population={population}\n"
+            f"stopped_on_plateau={result.stopped_on_plateau}\n",
             encoding="utf-8",
         )
 
-        phase2_path = artifacts.run_dir / "phase2_validation.json"
+        phase2_path = artifacts.run_dir / "phase2_evolution.json"
+        best_bench = result.best.pipeline.benchmark
         phase2_payload = {
-            "static_ok": result.static.ok,
-            "static_error": result.static.error_message,
-            "numerical_ok": result.numerical.ok if result.numerical else False,
-            "benchmark": {
-                "tok_s": result.benchmark.tok_s if result.benchmark else 0.0,
-                "latency_ms": result.benchmark.latency_ms if result.benchmark else 0.0,
-                "ttft_ms": result.benchmark.ttft_ms if result.benchmark else 0.0,
-                "vram_used_gb": result.benchmark.vram_used_gb if result.benchmark else 0.0,
+            "best": {
+                "generation": result.best.generation,
+                "mutation_type": result.best.mutation_type,
+                "static_ok": result.best.pipeline.static.ok,
+                "numerical_ok": result.best.pipeline.numerical.ok if result.best.pipeline.numerical else False,
+                "benchmark": {
+                    "tok_s": best_bench.tok_s if best_bench else 0.0,
+                    "latency_ms": best_bench.latency_ms if best_bench else 0.0,
+                    "ttft_ms": best_bench.ttft_ms if best_bench else 0.0,
+                    "vram_used_gb": best_bench.vram_used_gb if best_bench else 0.0,
+                },
             },
-            "healed_attempts": result.healed_attempts,
+            "history_best_tok_s": result.history_best_tok_s,
+            "stopped_on_plateau": result.stopped_on_plateau,
+            "total_evaluations": len(result.evaluations),
         }
         phase2_path.write_text(json.dumps(phase2_payload, indent=2), encoding="utf-8")
 
         click.echo(f"Run ID: {artifacts.run_id}")
         click.echo(f"Run dir: {artifacts.run_dir}")
-        click.echo(f"Static gate: {result.static.ok}")
-        click.echo(f"Numerical gate: {result.numerical.ok if result.numerical else False}")
-        click.echo(f"Benchmark gate: {result.benchmark.ok if result.benchmark else False}")
-        click.echo(f"Validation artifact: {phase2_path}")
+        click.echo(f"Best tok/s: {best_bench.tok_s if best_bench else 0.0}")
+        click.echo(f"Best generation: {result.best.generation}")
+        click.echo(f"Total evaluations: {len(result.evaluations)}")
+        click.echo(f"Evolution artifact: {phase2_path}")
         click.echo("Phase 2 dry-run complete.")
         return
 

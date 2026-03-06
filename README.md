@@ -18,6 +18,7 @@ Implemented architecture slices:
 - Profiling dry-run with run artifact persistence
 - Phase 1 dry-run genetic hyperparameter search with caching scaffolding
 - Phase 2 dry-run validation, healing, prompt budget logic, generation and evolution loop
+- Phase 2 safety guard: prompt generation is blocked with `KernupError` if reference kernel is missing
 - Patch generation formats (`simple`, `vllm`, `tgi`, `sglang`)
 - Bench summary and export from stored run results
 

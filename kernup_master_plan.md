@@ -358,6 +358,8 @@ All prompts are written in **English**. Context is strictly budgeted for small m
 | 7 | Final instruction (target metric, GPU-specific autotune configs) | ~100 |
 | **TOTAL** | | **~1500-2000** |
 
+**Mandatory guard (`phase2/prompt.py`):** if the reference kernel block is empty or missing, prompt generation must be blocked and a clear `KernupError` must be raised. Kernup must never send an incomplete prompt to the local LLM.
+
 ### 5.6 Self-Healing Prompt Addition
 
 When self-healing is triggered, Block 7 is replaced with:

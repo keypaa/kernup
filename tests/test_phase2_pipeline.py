@@ -1,3 +1,6 @@
+import pytest
+
+from kernup.errors import KernupError
 from kernup.phase2.healer import heal_with_retries
 from kernup.phase2.pipeline import run_phase2_validation_pipeline
 from kernup.phase2.prompt import PromptBudget, build_generation_prompt
@@ -43,6 +46,20 @@ def test_prompt_builder_respects_budget() -> None:
     )
     assert len(prompt) <= 1800
     assert "[Instruction]" in prompt
+
+
+def test_prompt_builder_raises_when_reference_kernel_missing() -> None:
+    with pytest.raises(KernupError):
+        build_generation_prompt(
+            constraints="constraints",
+            gpu_profile="gpu",
+            model_arch="model",
+            best_phase1="phase1",
+            reference_kernel="   ",
+            previous_best_kernel="prev",
+            final_instruction="instruction",
+            budget=PromptBudget(max_chars=1200),
+        )
 
 
 def test_healer_stops_after_success() -> None:

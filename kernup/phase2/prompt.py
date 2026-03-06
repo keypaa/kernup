@@ -4,10 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from kernup.errors import KernupError
+
 
 @dataclass(frozen=True)
 class PromptBudget:
     max_chars: int = 12000
+
+
+def _require_reference_kernel(reference_kernel: str) -> None:
+    if not reference_kernel.strip():
+        raise KernupError(
+            "Phase 2 prompt generation blocked: reference kernel is missing. "
+            "Provide a non-empty reference kernel before invoking the generator."
+        )
 
 
 def _clamp(text: str, max_chars: int) -> str:
@@ -29,6 +39,7 @@ def build_generation_prompt(
     budget: PromptBudget | None = None,
 ) -> str:
     """Build a structured English prompt while respecting character budget."""
+    _require_reference_kernel(reference_kernel)
     cfg = budget or PromptBudget()
 
     blocks = [

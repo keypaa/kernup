@@ -1,5 +1,6 @@
 from click.testing import CliRunner
 from pathlib import Path
+import sqlite3
 from uuid import uuid4
 
 from kernup.cli.main import cli
@@ -151,3 +152,59 @@ def test_optimize_phase2_not_implemented() -> None:
 
     assert result.exit_code != 0
     assert "Phase 2 is not implemented yet" in result.output
+
+
+def test_status_and_clean_commands() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        status_run_dir = Path("kernup_results") / "run_20260306_000001_abc123"
+        status_run_dir.mkdir(parents=True)
+        db_path = status_run_dir / "kernup.db"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE runs (
+                    id TEXT PRIMARY KEY,
+                    timestamp TEXT,
+                    generation INTEGER,
+                    block_size INTEGER,
+                    num_warps INTEGER,
+                    num_stages INTEGER,
+                    kv_strategy TEXT,
+                    split_k INTEGER,
+                    mutation_type TEXT
+                );
+                CREATE TABLE results (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    tok_s REAL,
+                    ttft_ms REAL,
+                    latency_ms REAL,
+                    vram_used_gb REAL,
+                    is_best INTEGER,
+                    notes TEXT
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO results (id, run_id, tok_s, ttft_ms, latency_ms, vram_used_gb, is_best, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid4()), "run_20260306_000001_abc123", 12.3, 98.0, 45.0, 6.0, 1, "test"),
+            )
+            conn.commit()
+
+        status = runner.invoke(cli, ["status", "--results", "./kernup_results"])
+        assert status.exit_code == 0
+        assert "Found 1 run(s)" in status.output
+        assert "best tok/s=12.300" in status.output
+
+        clean_run_dir = Path("kernup_to_clean") / "run_20260306_000002_def456"
+        clean_run_dir.mkdir(parents=True)
+
+        clean = runner.invoke(cli, ["clean", "--results", "./kernup_to_clean", "--yes"])
+        assert clean.exit_code == 0
+        assert "Removed 1 run(s)" in clean.output
+        assert not clean_run_dir.exists()

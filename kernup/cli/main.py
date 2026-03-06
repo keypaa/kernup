@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from kernup import __version__
+from kernup.cli.optimize import optimize_command
 from kernup.cli.profile import profile_command
 
 
@@ -15,6 +16,7 @@ def cli() -> None:
 
 
 cli.add_command(profile_command)
+cli.add_command(optimize_command)
 
 
 if __name__ == "__main__":

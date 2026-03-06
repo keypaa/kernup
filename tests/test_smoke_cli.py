@@ -12,6 +12,7 @@ def test_cli_help_shows_profile_command() -> None:
 
     assert result.exit_code == 0
     assert "profile" in result.output
+    assert "optimize" in result.output
 
 
 def test_profile_dry_run_with_gpu_bypass_succeeds() -> None:
@@ -112,3 +113,41 @@ def test_storage_roundtrip_in_memory() -> None:
         rows = list_results_for_run(conn, run_id)
         assert len(rows) == 1
         assert rows[0].tok_s == 100.0
+
+
+def test_optimize_phase1_dry_run_succeeds() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "optimize",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--phase",
+                "1",
+                "--dry-run",
+                "--allow-no-gpu",
+                "--iterations",
+                "6",
+                "--population",
+                "4",
+                "--output",
+                "./kernup_results",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Phase 1 dry-run complete" in result.output
+        assert "Best tok/s:" in result.output
+
+
+def test_optimize_phase2_not_implemented() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["optimize", "--hf", "Qwen/Qwen2.5-7B", "--phase", "2", "--dry-run"],
+    )
+
+    assert result.exit_code != 0
+    assert "Phase 2 is not implemented yet" in result.output

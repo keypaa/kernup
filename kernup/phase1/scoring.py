@@ -26,17 +26,21 @@ def _score_file(cache_dir: Path, cache_key: str) -> Path:
     return cache_dir / f"{cache_key}.json"
 
 
-def _config_factor(config: HyperparameterConfig) -> float:
-    """Map candidate config to a small multiplicative factor around 1.0."""
-    factor = 1.0
-    factor += (config.block_size - 128) / 2048.0
-    factor += (config.num_warps - 8) / 160.0
-    factor += (config.split_k - 4) / 220.0
-    if config.kv_strategy == "full":
-        factor += 0.01
-    if config.l2_cache_hint == "evict_last":
-        factor += 0.01
-    return max(0.85, min(1.15, factor))
+def _runtime_tuning(config: HyperparameterConfig) -> dict[str, object]:
+    """Map phase1 config values onto concrete runtime knobs used by real benchmarking."""
+    if config.num_warps <= 2:
+        batch_size = 1
+    elif config.num_warps <= 8:
+        batch_size = 2
+    else:
+        batch_size = 4
+
+    use_cache = config.kv_strategy != "chunked"
+    return {
+        "batch_size": batch_size,
+        "use_cache": use_cache,
+        "pad_to_multiple_of": config.tensor_padding,
+    }
 
 
 def score_config(
@@ -73,28 +77,22 @@ def score_config(
         )
 
     if not dry_run:
+        tuning = _runtime_tuning(config)
         runtime = benchmark_hf_model(
             hf_model=hf_model,
             prompt_text=prompt_text,
             max_new_tokens=max_new_tokens,
             warmup_runs=warmup_runs,
             measure_runs=measure_runs,
+            batch_size=int(tuning["batch_size"]),
+            use_cache=bool(tuning["use_cache"]),
+            pad_to_multiple_of=int(tuning["pad_to_multiple_of"]),
         )
-        factor = _config_factor(config)
-
-        tok_s = runtime.tok_s * factor
-        latency_ms = runtime.latency_ms / factor
-        ttft_ms = runtime.ttft_ms / factor
-        if target == "latency":
-            tok_s *= 0.97
-            latency_ms *= 0.9
-        elif target == "throughput":
-            tok_s *= 1.03
 
         payload = {
-            "tok_s": round(tok_s, 3),
-            "ttft_ms": round(ttft_ms, 3),
-            "latency_ms": round(latency_ms, 3),
+            "tok_s": runtime.tok_s,
+            "ttft_ms": runtime.ttft_ms,
+            "latency_ms": runtime.latency_ms,
             "vram_used_gb": runtime.vram_used_gb,
         }
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

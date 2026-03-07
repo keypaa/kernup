@@ -23,6 +23,7 @@ Implemented architecture slices:
 - Bench summary and export from stored run results
 - Real benchmark mode in `bench` (`--real`) using HuggingFace generation timing on CUDA
 - Real scoring path in `optimize` (without `--dry-run`) using measured runtime metrics
+- Phase 1 real search now maps config candidates to concrete runtime knobs (batch size, cache usage, tokenizer padding multiple)
 - Real phase 2 numerical validation (model forward consistency checks) in non-dry-run mode
 - Patch smoke checks (`patch --smoke` and optional `--smoke-with-model` for simple patches)
 - Resume mode now reuses the latest run folder and appends generations/artifacts

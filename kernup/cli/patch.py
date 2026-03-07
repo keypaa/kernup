@@ -7,7 +7,7 @@ import sqlite3
 
 import click
 
-from kernup.patch import render_sglang_patch, render_simple_patch, render_tgi_patch, render_vllm_patch
+from kernup.patch import render_sglang_patch, render_simple_patch, render_tgi_patch, render_vllm_patch, smoke_check_patch
 
 
 def _latest_run_dir(results_dir: Path) -> Path:
@@ -82,12 +82,30 @@ def _run_model_id(db_path: Path, run_id: str) -> str | None:
     default=False,
     help="Allow patch generation even when the run model id differs from --hf.",
 )
+@click.option("--smoke", is_flag=True, default=False, help="Run patch import/apply smoke check.")
+@click.option(
+    "--smoke-with-model",
+    is_flag=True,
+    default=False,
+    help="Use a real HF model for smoke check (simple format only, GPU recommended).",
+)
+@click.option(
+    "--smoke-prompt",
+    default="Say hello in one sentence.",
+    show_default=True,
+    help="Prompt used for model-backed patch smoke checks.",
+)
+@click.option("--smoke-max-new-tokens", default=8, show_default=True, type=int)
 def patch_command(
     hf_model: str,
     results_dir: str,
     patch_format: str,
     output_dir: str,
     allow_model_mismatch: bool,
+    smoke: bool,
+    smoke_with_model: bool,
+    smoke_prompt: str,
+    smoke_max_new_tokens: int,
 ) -> None:
     """Generate a patch artifact from the latest available run."""
     results_root = Path(results_dir)
@@ -125,6 +143,27 @@ def patch_command(
     file_path = output_root / f"patch_{patch_format}.py"
     file_path.write_text(content, encoding="utf-8")
 
+    if smoke_max_new_tokens <= 0:
+        raise click.ClickException("--smoke-max-new-tokens must be greater than 0")
+
+    smoke_message = None
+    if smoke:
+        if smoke_with_model and patch_format != "simple":
+            raise click.ClickException("--smoke-with-model currently supports only --format simple")
+        try:
+            smoke_message = smoke_check_patch(
+                file_path=file_path,
+                patch_format=patch_format,
+                hf_model=hf_model,
+                with_model=smoke_with_model,
+                prompt_text=smoke_prompt,
+                max_new_tokens=smoke_max_new_tokens,
+            )
+        except Exception as exc:
+            raise click.ClickException(f"Patch smoke check failed: {exc}") from exc
+
     click.echo(f"Using run: {run_id}")
     click.echo(f"Best tok/s: {tok_s:.3f}")
     click.echo(f"Patch file: {file_path}")
+    if smoke_message:
+        click.echo(f"Smoke: {smoke_message}")

@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
+from typing import Any
+
+
+@dataclass(frozen=True)
+class HFModelBundle:
+    torch: Any
+    tokenizer: Any
+    model: Any
+    device: str
 
 
 @dataclass(frozen=True)
@@ -12,6 +21,40 @@ class RuntimeBenchmarkResult:
     latency_ms: float
     ttft_ms: float
     vram_used_gb: float
+
+
+_MODEL_CACHE: dict[str, HFModelBundle] = {}
+
+
+def get_hf_model_bundle(hf_model: str) -> HFModelBundle:
+    """Load and cache tokenizer/model bundle for repeated benchmarking calls."""
+    cached = _MODEL_CACHE.get(hf_model)
+    if cached is not None:
+        return cached
+
+    torch = __import__("torch")
+    transformers = __import__("transformers")
+    AutoModelForCausalLM = getattr(transformers, "AutoModelForCausalLM")
+    AutoTokenizer = getattr(transformers, "AutoTokenizer")
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for real benchmarking")
+
+    device = "cuda"
+    tokenizer = AutoTokenizer.from_pretrained(hf_model)
+    if getattr(tokenizer, "pad_token_id", None) is None and getattr(tokenizer, "eos_token_id", None) is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        hf_model,
+        torch_dtype=torch.float16,
+        device_map=device,
+    )
+    model.eval()
+
+    bundle = HFModelBundle(torch=torch, tokenizer=tokenizer, model=model, device=device)
+    _MODEL_CACHE[hf_model] = bundle
+    return bundle
 
 
 def benchmark_hf_model(
@@ -29,22 +72,11 @@ def benchmark_hf_model(
     if measure_runs <= 0:
         raise ValueError("measure_runs must be > 0")
 
-    torch = __import__("torch")
-    transformers = __import__("transformers")
-    AutoModelForCausalLM = getattr(transformers, "AutoModelForCausalLM")
-    AutoTokenizer = getattr(transformers, "AutoTokenizer")
-
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is required for real benchmarking")
-
-    device = "cuda"
-    tokenizer = AutoTokenizer.from_pretrained(hf_model)
-    model = AutoModelForCausalLM.from_pretrained(
-        hf_model,
-        torch_dtype=torch.float16,
-        device_map=device,
-    )
-    model.eval()
+    bundle = get_hf_model_bundle(hf_model)
+    torch = bundle.torch
+    tokenizer = bundle.tokenizer
+    model = bundle.model
+    device = bundle.device
 
     encoded = tokenizer(prompt_text, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in encoded.items()}

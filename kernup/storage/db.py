@@ -102,6 +102,40 @@ def insert_run(conn: sqlite3.Connection, record: RunRecord) -> None:
     conn.commit()
 
 
+def upsert_run(conn: sqlite3.Connection, record: RunRecord) -> None:
+    """Insert or update a run record keyed by id."""
+    conn.execute(
+        """
+        INSERT INTO runs (id, model_id, timestamp, generation, block_size, num_warps, num_stages,
+                          kv_strategy, split_k, mutation_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            model_id=excluded.model_id,
+            timestamp=excluded.timestamp,
+            generation=excluded.generation,
+            block_size=excluded.block_size,
+            num_warps=excluded.num_warps,
+            num_stages=excluded.num_stages,
+            kv_strategy=excluded.kv_strategy,
+            split_k=excluded.split_k,
+            mutation_type=excluded.mutation_type
+        """,
+        (
+            record.id,
+            record.model_id,
+            record.timestamp,
+            record.generation,
+            record.block_size,
+            record.num_warps,
+            record.num_stages,
+            record.kv_strategy,
+            record.split_k,
+            record.mutation_type,
+        ),
+    )
+    conn.commit()
+
+
 def insert_result(conn: sqlite3.Connection, record: ResultRecord) -> None:
     conn.execute(
         """

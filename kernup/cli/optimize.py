@@ -1,10 +1,11 @@
-"""Optimize command entrypoint (phase 1 dry-run implementation)."""
+"""Optimize command entrypoint."""
 
 from __future__ import annotations
 
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 import sqlite3
 from uuid import uuid4
 
@@ -13,9 +14,81 @@ import click
 from kernup.errors import UserError
 from kernup.phase1.search import run_phase1_search
 from kernup.phase2.evolution import run_phase2_evolution
-from kernup.storage.db import ResultRecord, RunRecord, create_schema, insert_result, insert_run, open_connection
+from kernup.storage.db import ResultRecord, RunRecord, create_schema, insert_result, open_connection, upsert_run
 from kernup.utils.gpu import ensure_gpu_available
 from kernup.utils.runs import create_run_artifacts
+
+
+def _latest_run_dir(results_root: Path) -> Path | None:
+    runs = sorted([p for p in results_root.glob("run_*") if p.is_dir()])
+    return runs[-1] if runs else None
+
+
+def _read_run_model(db_path: Path, run_id: str) -> str | None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        try:
+            row = conn.execute(
+                """
+                SELECT model_id
+                FROM runs
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return str(row[0]) if row[0] else None
+
+
+def _last_generation(db_path: Path, phase: str) -> int:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(
+            """
+            SELECT notes
+            FROM results
+            ORDER BY rowid ASC
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    pattern = r"phase2_gen=(\d+)" if phase == "2" else r"(?<!phase2_)gen=(\d+)"
+    maximum = -1
+    for row in rows:
+        notes = str(row[0]) if row and row[0] else ""
+        match = re.search(pattern, notes)
+        if match:
+            maximum = max(maximum, int(match.group(1)))
+    return maximum
+
+
+def _merge_history(path: Path, key: str, new_history: list[float]) -> list[float]:
+    if not path.exists():
+        return new_history
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        previous = list(existing.get(key, []))
+    except Exception:
+        return new_history
+    if not previous:
+        return new_history
+    # Drop first point because it corresponds to current starting generation.
+    return previous + new_history[1:]
+
+
+def _append_or_write_log(path: Path, content: str, append: bool) -> None:
+    if append and path.exists():
+        path.write_text(path.read_text(encoding="utf-8") + "\n" + content, encoding="utf-8")
+        return
+    path.write_text(content, encoding="utf-8")
 
 
 @click.command("optimize")
@@ -74,7 +147,7 @@ def optimize_command(
     allow_no_gpu: bool,
     allow_model_mismatch: bool,
 ) -> None:
-    """Optimize a model using phase 1 search (dry-run supported)."""
+    """Optimize a model using phase 1 or phase 2 workflows."""
     if max_new_tokens <= 0:
         raise click.ClickException("--max-new-tokens must be greater than 0")
     if warmup_runs < 0:
@@ -90,38 +163,24 @@ def optimize_command(
     if not dry_run and gpu_status.bypassed:
         raise click.ClickException("Real optimization requires GPU; remove --allow-no-gpu.")
 
+    results_root = Path(output)
+    resume_dir: Path | None = None
+    start_generation = 0
+
     if resume:
-        results_root = Path(output)
-        runs = sorted([p for p in results_root.glob("run_*") if p.is_dir()])
-        if not runs:
+        latest = _latest_run_dir(results_root)
+        if latest is None:
             raise click.ClickException(
                 f"--resume requested but no runs found under {results_root}"
             )
-        latest = runs[-1]
+        resume_dir = latest
         db_path = latest / "kernup.db"
         if not db_path.exists():
             raise click.ClickException(
                 f"--resume requested but latest run has no database: {db_path}"
             )
 
-        conn = sqlite3.connect(str(db_path))
-        try:
-            try:
-                row = conn.execute(
-                    """
-                    SELECT model_id
-                    FROM runs
-                    WHERE id = ?
-                    LIMIT 1
-                    """,
-                    (latest.name,),
-                ).fetchone()
-            except sqlite3.OperationalError:
-                row = None
-        finally:
-            conn.close()
-
-        latest_model = None if row is None else (str(row[0]) if row[0] else None)
+        latest_model = _read_run_model(db_path, latest.name)
         if latest_model is None:
             if not allow_model_mismatch:
                 raise click.ClickException(
@@ -137,7 +196,9 @@ def optimize_command(
                 )
             click.echo(f"Warning: resume model mismatch bypass enabled ({latest_model} vs {hf_model}).")
 
-    artifacts = create_run_artifacts(output)
+        start_generation = _last_generation(db_path, phase=phase) + 1
+
+    artifacts = create_run_artifacts(output, run_id=resume_dir.name if resume_dir else None)
     now_iso = datetime.now().astimezone().isoformat()
     cache_dir = artifacts.run_dir / ".triton_cache"
     gpu_compute_capability = "dry-run"
@@ -150,6 +211,8 @@ def optimize_command(
     click.echo(f"Model: {hf_model}")
     click.echo(f"Target: {target}")
     click.echo(gpu_status.reason)
+    if resume_dir is not None:
+        click.echo(f"Resuming run: {artifacts.run_id} (start generation: {start_generation})")
 
     if phase == "2":
         click.echo("Running phase 2 dry-run evolution loop..." if dry_run else "Running phase 2 real evolution loop...")
@@ -166,6 +229,7 @@ def optimize_command(
             max_new_tokens=max_new_tokens,
             warmup_runs=warmup_runs,
             measure_runs=measure_runs,
+            start_generation=start_generation,
         )
 
         with open_connection(artifacts.db_path) as conn:
@@ -174,7 +238,7 @@ def optimize_command(
                 id=artifacts.run_id,
                 model_id=hf_model,
                 timestamp=now_iso,
-                generation=len(result.history_best_tok_s) - 1,
+                generation=max((evaluation.generation for evaluation in result.evaluations), default=start_generation),
                 block_size=0,
                 num_warps=0,
                 num_stages=0,
@@ -182,7 +246,7 @@ def optimize_command(
                 split_k=0,
                 mutation_type="phase2-evolution",
             )
-            insert_run(conn, run_record)
+            upsert_run(conn, run_record)
 
             for evaluation in result.evaluations:
                 bench = evaluation.pipeline.benchmark
@@ -204,20 +268,27 @@ def optimize_command(
                     ),
                 )
 
-        artifacts.log_path.write_text(
-            "KERNUP optimize phase2 dry-run evolution log\n"
+        mode_label = "dry-run" if dry_run else "real"
+        log_prefix = "KERNUP optimize phase2 resumed" if resume_dir is not None else "KERNUP optimize phase2"
+        log_content = (
+            f"{log_prefix} {mode_label} evolution log\n"
             f"timestamp={now_iso}\n"
             f"run_id={artifacts.run_id}\n"
             f"model={hf_model}\n"
             f"target={target}\n"
             f"iterations={iterations}\n"
             f"population={population}\n"
-            f"stopped_on_plateau={result.stopped_on_plateau}\n",
-            encoding="utf-8",
+            f"start_generation={start_generation}\n"
+            f"stopped_on_plateau={result.stopped_on_plateau}\n"
         )
+        _append_or_write_log(artifacts.log_path, log_content, append=resume_dir is not None)
 
         phase2_path = artifacts.run_dir / "phase2_evolution.json"
         best_bench = result.best.pipeline.benchmark
+        history = result.history_best_tok_s
+        if resume_dir is not None:
+            history = _merge_history(phase2_path, "history_best_tok_s", history)
+
         phase2_payload = {
             "best": {
                 "generation": result.best.generation,
@@ -231,7 +302,7 @@ def optimize_command(
                     "vram_used_gb": best_bench.vram_used_gb if best_bench else 0.0,
                 },
             },
-            "history_best_tok_s": result.history_best_tok_s,
+            "history_best_tok_s": history,
             "stopped_on_plateau": result.stopped_on_plateau,
             "total_evaluations": len(result.evaluations),
         }
@@ -262,6 +333,7 @@ def optimize_command(
         max_new_tokens=max_new_tokens,
         warmup_runs=warmup_runs,
         measure_runs=measure_runs,
+        start_generation=start_generation,
     )
 
     with open_connection(artifacts.db_path) as conn:
@@ -270,7 +342,7 @@ def optimize_command(
             id=artifacts.run_id,
             model_id=hf_model,
             timestamp=now_iso,
-            generation=len(result.history_best_tok_s) - 1,
+            generation=max((score.generation for score in result.evaluations), default=start_generation),
             block_size=result.best_config.block_size,
             num_warps=result.best_config.num_warps,
             num_stages=result.best_config.num_stages,
@@ -278,7 +350,7 @@ def optimize_command(
             split_k=result.best_config.split_k,
             mutation_type="phase1",
         )
-        insert_run(conn, run_record)
+        upsert_run(conn, run_record)
 
         for score in result.evaluations:
             insert_result(
@@ -295,21 +367,28 @@ def optimize_command(
                 ),
             )
 
-    artifacts.log_path.write_text(
-        "KERNUP optimize dry-run log\n"
+    mode_label = "dry-run" if dry_run else "real"
+    log_prefix = "KERNUP optimize resumed" if resume_dir is not None else "KERNUP optimize"
+    log_content = (
+        f"{log_prefix} {mode_label} log\n"
         f"timestamp={now_iso}\n"
         f"run_id={artifacts.run_id}\n"
         f"model={hf_model}\n"
         f"target={target}\n"
         f"iterations={iterations}\n"
         f"population={population}\n"
-        f"stopped_on_plateau={result.stopped_on_plateau}\n",
-        encoding="utf-8",
+        f"start_generation={start_generation}\n"
+        f"stopped_on_plateau={result.stopped_on_plateau}\n"
     )
+    _append_or_write_log(artifacts.log_path, log_content, append=resume_dir is not None)
 
     progression_path = artifacts.run_dir / "phase1_progression.json"
+    history = result.history_best_tok_s
+    if resume_dir is not None:
+        history = _merge_history(progression_path, "best_tok_s_by_generation", history)
+
     progression_path.write_text(
-        json.dumps({"best_tok_s_by_generation": result.history_best_tok_s}, indent=2),
+        json.dumps({"best_tok_s_by_generation": history}, indent=2),
         encoding="utf-8",
     )
 

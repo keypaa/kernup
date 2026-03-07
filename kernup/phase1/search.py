@@ -53,6 +53,7 @@ def run_phase1_search(
     max_new_tokens: int = 32,
     warmup_runs: int = 1,
     measure_runs: int = 2,
+    start_generation: int = 0,
     seed: int = 42,
 ) -> Phase1SearchResult:
     rng = random.Random(seed)
@@ -63,7 +64,7 @@ def run_phase1_search(
     for cfg in configs:
         score = score_config(
             cfg,
-            generation=0,
+            generation=start_generation,
             cache_dir=cache_dir,
             target=target,
             gpu_compute_capability=gpu_compute_capability,
@@ -81,7 +82,7 @@ def run_phase1_search(
     history_best = [best_score.tok_s]
     plateau = False
 
-    for generation in range(1, iterations + 1):
+    for generation in range(start_generation + 1, start_generation + iterations + 1):
         next_population: list[HyperparameterConfig] = [best_cfg]
         while len(next_population) < population:
             parent = _tournament_select(scored, rng, target)

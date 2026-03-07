@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from kernup.phase2.healer import heal_with_retries
 from kernup.phase2.validator.benchmark import BenchmarkValidationResult, benchmark_kernel
-from kernup.phase2.validator.numerical import NumericalValidationResult, validate_numerical
+from kernup.phase2.validator.numerical import NumericalValidationResult, validate_model_numerical, validate_numerical
 from kernup.phase2.validator.static import StaticValidationResult, validate_static
 
 
@@ -60,12 +60,19 @@ def run_phase2_validation_pipeline(
             final_code=final_attempt.code,
         )
 
-    numerical_result = validate_numerical(
-        reference=[1.0, 2.0, 3.0, 4.0],
-        candidate=[1.0, 2.0, 3.0, 4.0],
-        rtol=1e-2,
-        atol=1e-2,
-    )
+    if dry_run:
+        numerical_result = validate_numerical(
+            reference=[1.0, 2.0, 3.0, 4.0],
+            candidate=[1.0, 2.0, 3.0, 4.0],
+            rtol=1e-2,
+            atol=1e-2,
+        )
+    else:
+        numerical_result = validate_model_numerical(
+            hf_model=hf_model,
+            prompt_text=prompt_text,
+            max_new_tokens=max_new_tokens,
+        )
     if not numerical_result.ok:
         return Phase2PipelineResult(
             static=static_result,

@@ -48,6 +48,7 @@ def run_phase2_evolution(
     max_new_tokens: int = 32,
     warmup_runs: int = 1,
     measure_runs: int = 2,
+    start_generation: int = 0,
     seed: int = 101,
 ) -> Phase2EvolutionResult:
     rng = random.Random(seed)
@@ -64,7 +65,7 @@ def run_phase2_evolution(
 
     evaluations: list[Phase2Evaluation] = []
 
-    # Generation 0
+    # First generation for this run or resume segment.
     for _ in range(population):
         mutation = pick_mutation()
         candidate = generator.generate(
@@ -72,7 +73,7 @@ def run_phase2_evolution(
                 reference_kernel=reference_kernel,
                 previous_best_kernel=best_kernel,
                 mutation_type=mutation,
-                generation=0,
+                generation=start_generation,
             )
         )
         pipeline = run_phase2_validation_pipeline(
@@ -86,13 +87,13 @@ def run_phase2_evolution(
             warmup_runs=warmup_runs,
             measure_runs=measure_runs,
         )
-        evaluations.append(Phase2Evaluation(generation=0, mutation_type=mutation, pipeline=pipeline))
+        evaluations.append(Phase2Evaluation(generation=start_generation, mutation_type=mutation, pipeline=pipeline))
 
     best = max(evaluations, key=lambda item: _objective(item, target))
     history_best = [best.pipeline.benchmark.tok_s if best.pipeline.benchmark else 0.0]
 
     stopped_on_plateau = False
-    for gen in range(1, iterations + 1):
+    for gen in range(start_generation + 1, start_generation + iterations + 1):
         if len(history_best) > 5:
             # adaptive mutation: increase heavy mutation to escape local minima
             mutation_weights = [0.5, 0.25, 0.25]

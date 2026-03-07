@@ -1,5 +1,6 @@
 from click.testing import CliRunner
 from pathlib import Path
+import re
 import sqlite3
 from uuid import uuid4
 
@@ -369,6 +370,151 @@ def test_patch_and_bench_commands() -> None:
         assert "Export:" in bench_result.output
         bench_exports = list(Path("bench_out").glob("bench_run_20260306_000003_xyz987.json"))
         assert len(bench_exports) == 1
+
+
+def test_patch_smoke_succeeds_for_simple_patch() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        run_dir = Path("kernup_results") / "run_20260306_000009_smoke11"
+        run_dir.mkdir(parents=True)
+        db_path = run_dir / "kernup.db"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE runs (
+                    id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL DEFAULT '',
+                    timestamp TEXT,
+                    generation INTEGER,
+                    block_size INTEGER,
+                    num_warps INTEGER,
+                    num_stages INTEGER,
+                    kv_strategy TEXT,
+                    split_k INTEGER,
+                    mutation_type TEXT
+                );
+                CREATE TABLE results (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    tok_s REAL,
+                    ttft_ms REAL,
+                    latency_ms REAL,
+                    vram_used_gb REAL,
+                    is_best INTEGER,
+                    notes TEXT
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO runs (id, model_id, timestamp, generation, block_size, num_warps, num_stages, kv_strategy, split_k, mutation_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_20260306_000009_smoke11",
+                    "Qwen/Qwen2.5-7B",
+                    "2026-03-06T00:00:00+00:00",
+                    0,
+                    0,
+                    0,
+                    0,
+                    "n/a",
+                    0,
+                    "dry-run",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO results (id, run_id, tok_s, ttft_ms, latency_ms, vram_used_gb, is_best, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid4()), "run_20260306_000009_smoke11", 11.1, 99.0, 45.0, 6.0, 1, "best"),
+            )
+            conn.commit()
+
+        patch_result = runner.invoke(
+            cli,
+            [
+                "patch",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--results",
+                "./kernup_results",
+                "--format",
+                "simple",
+                "--output",
+                "./patch_out",
+                "--smoke",
+            ],
+        )
+        assert patch_result.exit_code == 0
+        assert "Smoke:" in patch_result.output
+
+
+def test_optimize_resume_reuses_latest_run_and_offsets_generations() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        first = runner.invoke(
+            cli,
+            [
+                "optimize",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--phase",
+                "1",
+                "--dry-run",
+                "--allow-no-gpu",
+                "--iterations",
+                "1",
+                "--population",
+                "3",
+                "--output",
+                "./kernup_results",
+            ],
+        )
+        assert first.exit_code == 0
+
+        lines = [line.strip() for line in first.output.splitlines()]
+        run_id = next(line.split(":", maxsplit=1)[1].strip() for line in lines if line.startswith("Run ID:"))
+
+        resumed = runner.invoke(
+            cli,
+            [
+                "optimize",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--phase",
+                "1",
+                "--dry-run",
+                "--allow-no-gpu",
+                "--iterations",
+                "1",
+                "--population",
+                "3",
+                "--resume",
+                "--output",
+                "./kernup_results",
+            ],
+        )
+        assert resumed.exit_code == 0
+        assert f"Resuming run: {run_id}" in resumed.output
+
+        runs = [p for p in Path("kernup_results").glob("run_*") if p.is_dir()]
+        assert len(runs) == 1
+        db_path = Path("kernup_results") / run_id / "kernup.db"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute("SELECT notes FROM results").fetchall()
+
+        max_gen = -1
+        for row in rows:
+            notes = str(row[0]) if row and row[0] else ""
+            match = re.search(r"gen=(\d+)", notes)
+            if match:
+                max_gen = max(max_gen, int(match.group(1)))
+
+        assert max_gen >= 3
 
 
 def test_bench_real_mode_prints_measured_metrics(monkeypatch) -> None:

@@ -135,8 +135,10 @@ kernup profile --hf <repo/model> [--device cuda:0] [--dry-run] [--allow-no-gpu] 
 ### optimize
 
 ```text
-kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balanced] [--iterations N] [--population N] [--plateau-window N] [--plateau-threshold F] [--dry-run] [--allow-no-gpu] [--output ./kernup_results]
+kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balanced] [--iterations N] [--population N] [--plateau-window N] [--plateau-threshold F] [--resume] [--dry-run] [--allow-no-gpu] [--allow-model-mismatch] [--output ./kernup_results]
 ```
+
+When `--resume` is used, Kernup checks that the latest run model matches `--hf`. Use `--allow-model-mismatch` only if you intentionally want to bypass this guardrail.
 
 ### patch
 
@@ -153,9 +155,11 @@ kernup bench --hf <repo/model> --results ./kernup_results [--seq-lens 128,512,20
 ### utilities
 
 ```text
-kernup status --results ./kernup_results
+kernup status --results ./kernup_results [--hf <repo/model>]
 kernup clean --results ./kernup_results [--yes]
 ```
+
+`status` displays the run model id and can be filtered by model with `--hf`.
 
 ## Output Structure
 

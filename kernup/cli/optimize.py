@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 from pathlib import Path
+import sqlite3
 from uuid import uuid4
 
 import click
@@ -31,12 +32,19 @@ from kernup.utils.runs import create_run_artifacts
 @click.option("--plateau-window", default=10, show_default=True, type=int)
 @click.option("--plateau-threshold", default=0.01, show_default=True, type=float)
 @click.option("--output", default="./kernup_results", show_default=True)
+@click.option("--resume", is_flag=True, default=False, help="Resume from the latest run metadata.")
 @click.option("--dry-run", is_flag=True, default=False, help="Run synthetic phase 1 without GPU benchmarking.")
 @click.option(
     "--allow-no-gpu",
     is_flag=True,
     default=False,
     help="Bypass GPU requirement for local setup and dry-run validation.",
+)
+@click.option(
+    "--allow-model-mismatch",
+    is_flag=True,
+    default=False,
+    help="Allow resume when latest run model differs from --hf.",
 )
 def optimize_command(
     hf_model: str,
@@ -47,8 +55,10 @@ def optimize_command(
     plateau_window: int,
     plateau_threshold: float,
     output: str,
+    resume: bool,
     dry_run: bool,
     allow_no_gpu: bool,
+    allow_model_mismatch: bool,
 ) -> None:
     """Optimize a model using phase 1 search (dry-run supported)."""
     if not dry_run:
@@ -60,6 +70,53 @@ def optimize_command(
         gpu_status = ensure_gpu_available(allow_no_gpu=allow_no_gpu)
     except UserError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    if resume:
+        results_root = Path(output)
+        runs = sorted([p for p in results_root.glob("run_*") if p.is_dir()])
+        if not runs:
+            raise click.ClickException(
+                f"--resume requested but no runs found under {results_root}"
+            )
+        latest = runs[-1]
+        db_path = latest / "kernup.db"
+        if not db_path.exists():
+            raise click.ClickException(
+                f"--resume requested but latest run has no database: {db_path}"
+            )
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            try:
+                row = conn.execute(
+                    """
+                    SELECT model_id
+                    FROM runs
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (latest.name,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = None
+        finally:
+            conn.close()
+
+        latest_model = None if row is None else (str(row[0]) if row[0] else None)
+        if latest_model is None:
+            if not allow_model_mismatch:
+                raise click.ClickException(
+                    "Latest run model metadata is missing; cannot validate --resume consistency. "
+                    "Use --allow-model-mismatch to bypass."
+                )
+            click.echo("Warning: resume model metadata missing, bypass enabled.")
+        elif latest_model != hf_model:
+            if not allow_model_mismatch:
+                raise click.ClickException(
+                    f"Resume model mismatch: latest run uses '{latest_model}' but --hf is '{hf_model}'. "
+                    "Use --allow-model-mismatch to bypass."
+                )
+            click.echo(f"Warning: resume model mismatch bypass enabled ({latest_model} vs {hf_model}).")
 
     artifacts = create_run_artifacts(output)
     now_iso = datetime.now().astimezone().isoformat()

@@ -18,7 +18,8 @@ def _run_dirs(results_root: Path) -> list[Path]:
 
 @click.command("status")
 @click.option("--results", "results_dir", default="./kernup_results", show_default=True)
-def status_command(results_dir: str) -> None:
+@click.option("--hf", "hf_model", default=None, help="Filter runs by model id.")
+def status_command(results_dir: str, hf_model: str | None) -> None:
     """Show discovered run folders and basic best score summary."""
     root = Path(results_dir)
     runs = _run_dirs(root)
@@ -47,6 +48,21 @@ def status_command(results_dir: str) -> None:
                     """
                 )
                 row = cursor.fetchone()
+
+                try:
+                    cursor.execute(
+                        """
+                        SELECT model_id
+                        FROM runs
+                        WHERE id = ?
+                        LIMIT 1
+                        """,
+                        (run_dir.name,),
+                    )
+                    model_row = cursor.fetchone()
+                    model_id = str(model_row[0]) if model_row and model_row[0] else "unknown"
+                except sqlite3.OperationalError:
+                    model_id = "unknown"
             finally:
                 cursor.close()
         finally:
@@ -56,8 +72,11 @@ def status_command(results_dir: str) -> None:
             click.echo(f"- {run_dir.name}: no result rows")
             continue
 
+        if hf_model is not None and model_id != hf_model:
+            continue
+
         click.echo(
-            f"- {run_dir.name}: best tok/s={row[0]:.3f}, latency_ms={row[1]:.3f}, ttft_ms={row[2]:.3f}"
+            f"- {run_dir.name}: model={model_id}, best tok/s={row[0]:.3f}, latency_ms={row[1]:.3f}, ttft_ms={row[2]:.3f}"
         )
 
 

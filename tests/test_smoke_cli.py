@@ -206,6 +206,24 @@ def test_status_and_clean_commands() -> None:
             )
             conn.execute(
                 """
+                INSERT INTO runs (id, model_id, timestamp, generation, block_size, num_warps, num_stages, kv_strategy, split_k, mutation_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_20260306_000001_abc123",
+                    "Qwen/Qwen2.5-7B",
+                    "2026-03-06T00:00:00+00:00",
+                    0,
+                    0,
+                    0,
+                    0,
+                    "n/a",
+                    0,
+                    "dry-run",
+                ),
+            )
+            conn.execute(
+                """
                 INSERT INTO results (id, run_id, tok_s, ttft_ms, latency_ms, vram_used_gb, is_best, notes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -216,7 +234,15 @@ def test_status_and_clean_commands() -> None:
         status = runner.invoke(cli, ["status", "--results", "./kernup_results"])
         assert status.exit_code == 0
         assert "Found 1 run(s)" in status.output
+        assert "model=Qwen/Qwen2.5-7B" in status.output
         assert "best tok/s=12.300" in status.output
+
+        status_filtered = runner.invoke(
+            cli,
+            ["status", "--results", "./kernup_results", "--hf", "Qwen/Qwen2.5-7B"],
+        )
+        assert status_filtered.exit_code == 0
+        assert "run_20260306_000001_abc123" in status_filtered.output
 
         clean_run_dir = Path("kernup_to_clean") / "run_20260306_000002_def456"
         clean_run_dir.mkdir(parents=True)
@@ -416,3 +442,77 @@ def test_patch_and_bench_block_model_mismatch() -> None:
         )
         assert bench_result.exit_code != 0
         assert "Model mismatch" in bench_result.output
+
+
+def test_optimize_resume_blocks_model_mismatch() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        run_dir = Path("kernup_results") / "run_20260306_000005_qwer12"
+        run_dir.mkdir(parents=True)
+        db_path = run_dir / "kernup.db"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE runs (
+                    id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL DEFAULT '',
+                    timestamp TEXT,
+                    generation INTEGER,
+                    block_size INTEGER,
+                    num_warps INTEGER,
+                    num_stages INTEGER,
+                    kv_strategy TEXT,
+                    split_k INTEGER,
+                    mutation_type TEXT
+                );
+                CREATE TABLE results (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    tok_s REAL,
+                    ttft_ms REAL,
+                    latency_ms REAL,
+                    vram_used_gb REAL,
+                    is_best INTEGER,
+                    notes TEXT
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO runs (id, model_id, timestamp, generation, block_size, num_warps, num_stages, kv_strategy, split_k, mutation_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_20260306_000005_qwer12",
+                    "Qwen/Qwen2.5-7B",
+                    "2026-03-06T00:00:00+00:00",
+                    0,
+                    0,
+                    0,
+                    0,
+                    "n/a",
+                    0,
+                    "dry-run",
+                ),
+            )
+            conn.commit()
+
+        result = runner.invoke(
+            cli,
+            [
+                "optimize",
+                "--hf",
+                "Qwen/Qwen3.5-4B",
+                "--phase",
+                "1",
+                "--dry-run",
+                "--allow-no-gpu",
+                "--resume",
+                "--output",
+                "./kernup_results",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Resume model mismatch" in result.output

@@ -23,6 +23,9 @@ Implemented architecture slices:
 - Bench summary and export from stored run results
 - Real benchmark mode in `bench` (`--real`) using HuggingFace generation timing on CUDA
 - Real scoring path in `optimize` (without `--dry-run`) using measured runtime metrics
+- Real phase 2 numerical validation (model forward consistency checks) in non-dry-run mode
+- Patch smoke checks (`patch --smoke` and optional `--smoke-with-model` for simple patches)
+- Resume mode now reuses the latest run folder and appends generations/artifacts
 
 ## Requirements
 
@@ -140,15 +143,17 @@ kernup profile --hf <repo/model> [--device cuda:0] [--dry-run] [--allow-no-gpu] 
 kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balanced] [--iterations N] [--population N] [--plateau-window N] [--plateau-threshold F] [--resume] [--dry-run] [--prompt TEXT] [--max-new-tokens N] [--warmup-runs N] [--measure-runs N] [--allow-no-gpu] [--allow-model-mismatch] [--output ./kernup_results]
 ```
 
-When `--resume` is used, Kernup checks that the latest run model matches `--hf`. Use `--allow-model-mismatch` only if you intentionally want to bypass this guardrail.
+When `--resume` is used, Kernup validates model consistency and then continues in the latest run folder, appending new generations and preserving existing logs/progression artifacts.
 
 Without `--dry-run`, optimize runs real GPU timing for candidate evaluation. Do not use `--allow-no-gpu` in this mode.
 
 ### patch
 
 ```text
-kernup patch --hf <repo/model> --results ./kernup_results --format simple|vllm|tgi|sglang --output ./patch [--allow-model-mismatch]
+kernup patch --hf <repo/model> --results ./kernup_results --format simple|vllm|tgi|sglang --output ./patch [--allow-model-mismatch] [--smoke] [--smoke-with-model] [--smoke-prompt TEXT] [--smoke-max-new-tokens N]
 ```
+
+`--smoke` verifies generated patch import/apply behavior. `--smoke-with-model` performs a minimal generation check and currently supports `--format simple`.
 
 ### bench
 

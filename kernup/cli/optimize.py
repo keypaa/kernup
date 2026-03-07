@@ -113,6 +113,18 @@ def _append_or_write_log(path: Path, content: str, append: bool) -> None:
 @click.option("--warmup-runs", default=1, show_default=True, type=int)
 @click.option("--measure-runs", default=2, show_default=True, type=int)
 @click.option(
+    "--search-mode",
+    type=click.Choice(["standard", "max"], case_sensitive=False),
+    default="standard",
+    show_default=True,
+    help="Phase 1 search strategy. 'max' uses multi-fidelity refinement and restart-on-stagnation.",
+)
+@click.option("--max-refine-top-k", default=2, show_default=True, type=int)
+@click.option("--max-refine-warmup-runs", default=2, show_default=True, type=int)
+@click.option("--max-refine-measure-runs", default=6, show_default=True, type=int)
+@click.option("--max-stability-penalty", default=0.15, show_default=True, type=float)
+@click.option("--max-restarts", default=1, show_default=True, type=int)
+@click.option(
     "--allow-no-gpu",
     is_flag=True,
     default=False,
@@ -139,6 +151,12 @@ def optimize_command(
     max_new_tokens: int,
     warmup_runs: int,
     measure_runs: int,
+    search_mode: str,
+    max_refine_top_k: int,
+    max_refine_warmup_runs: int,
+    max_refine_measure_runs: int,
+    max_stability_penalty: float,
+    max_restarts: int,
     allow_no_gpu: bool,
     allow_model_mismatch: bool,
 ) -> None:
@@ -149,6 +167,16 @@ def optimize_command(
         raise click.ClickException("--warmup-runs must be >= 0")
     if measure_runs <= 0:
         raise click.ClickException("--measure-runs must be greater than 0")
+    if max_refine_top_k <= 0:
+        raise click.ClickException("--max-refine-top-k must be greater than 0")
+    if max_refine_warmup_runs < 0:
+        raise click.ClickException("--max-refine-warmup-runs must be >= 0")
+    if max_refine_measure_runs <= 0:
+        raise click.ClickException("--max-refine-measure-runs must be greater than 0")
+    if max_stability_penalty < 0:
+        raise click.ClickException("--max-stability-penalty must be >= 0")
+    if max_restarts < 0:
+        raise click.ClickException("--max-restarts must be >= 0")
 
     try:
         gpu_status = ensure_gpu_available(allow_no_gpu=allow_no_gpu)
@@ -195,7 +223,7 @@ def optimize_command(
 
     artifacts = create_run_artifacts(output, run_id=resume_dir.name if resume_dir else None)
     now_iso = datetime.now().astimezone().isoformat()
-    cache_dir = artifacts.run_dir / ".triton_cache"
+    cache_dir = results_root / ".phase1_cache"
     gpu_compute_capability = "dry-run"
     if not dry_run:
         import torch
@@ -205,6 +233,8 @@ def optimize_command(
 
     click.echo(f"Model: {hf_model}")
     click.echo(f"Target: {target}")
+    if phase == "1":
+        click.echo(f"Search mode: {search_mode}")
     click.echo(gpu_status.reason)
     if resume_dir is not None:
         click.echo(f"Resuming run: {artifacts.run_id} (start generation: {start_generation})")
@@ -328,6 +358,12 @@ def optimize_command(
         max_new_tokens=max_new_tokens,
         warmup_runs=warmup_runs,
         measure_runs=measure_runs,
+        search_mode=search_mode,
+        max_refine_top_k=max_refine_top_k,
+        max_refine_warmup_runs=max_refine_warmup_runs,
+        max_refine_measure_runs=max_refine_measure_runs,
+        max_stability_penalty=max_stability_penalty,
+        max_restarts=max_restarts,
         start_generation=start_generation,
     )
 

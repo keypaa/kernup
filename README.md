@@ -142,12 +142,14 @@ kernup profile --hf <repo/model> [--device cuda:0] [--dry-run] [--allow-no-gpu] 
 ### optimize
 
 ```text
-kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balanced] [--iterations N] [--population N] [--plateau-window N] [--plateau-threshold F] [--resume] [--dry-run] [--prompt TEXT] [--max-new-tokens N] [--warmup-runs N] [--measure-runs N] [--allow-no-gpu] [--allow-model-mismatch] [--output ./kernup_results]
+kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balanced] [--iterations N] [--population N] [--plateau-window N] [--plateau-threshold F] [--resume] [--dry-run] [--prompt TEXT] [--max-new-tokens N] [--warmup-runs N] [--measure-runs N] [--search-mode standard|max] [--max-refine-top-k N] [--max-refine-warmup-runs N] [--max-refine-measure-runs N] [--max-stability-penalty F] [--max-restarts N] [--allow-no-gpu] [--allow-model-mismatch] [--output ./kernup_results]
 ```
 
 When `--resume` is used, Kernup validates model consistency and then continues in the latest run folder, appending new generations and preserving existing logs/progression artifacts.
 
 Without `--dry-run`, optimize runs real GPU timing for candidate evaluation. Do not use `--allow-no-gpu` in this mode.
+
+For phase 1, `--search-mode max` enables multi-fidelity search with top-k refinement, stability-aware ranking, and restart-on-stagnation to extract stronger tuning results.
 
 ### patch
 

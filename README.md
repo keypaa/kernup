@@ -159,10 +159,12 @@ kernup patch --hf <repo/model> --results ./kernup_results --format simple|vllm|t
 ### bench
 
 ```text
-kernup bench --hf <repo/model> --results ./kernup_results [--seq-lens 128,512,2048] [--batch-sizes 1,4,8,16] [--real] [--prompt TEXT] [--max-new-tokens N] [--warmup-runs N] [--measure-runs N] [--export] [--output ./kernup_results] [--allow-model-mismatch]
+kernup bench --hf <repo/model> --results ./kernup_results [--seq-lens 128,512,2048] [--batch-sizes 1,4,8,16] [--real] [--prompt TEXT] [--max-new-tokens N] [--warmup-runs N] [--measure-runs N] [--baseline-tok-s F] [--export] [--output ./kernup_results] [--allow-model-mismatch]
 ```
 
 With `--real`, `bench` measures live CUDA generation metrics directly from the model instead of reading the latest run database.
+
+Without `--baseline-tok-s`, `bench` computes baseline throughput from generation 0 rows in the selected run (or uses the live measurement itself in `--real` mode), then reports `Speedup vs baseline`.
 
 ### utilities
 

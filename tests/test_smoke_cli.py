@@ -634,6 +634,93 @@ def test_bench_real_mode_prints_measured_metrics(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "Real benchmark mode enabled." in result.output
     assert "Best tok/s: 77.700" in result.output
+    assert "Baseline tok/s: 77.700 (live-self)" in result.output
+    assert "Speedup vs baseline: 1.000x" in result.output
+
+
+def test_bench_computes_speedup_from_generation_zero_baseline() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        run_dir = Path("kernup_results") / "run_20260306_000012_speed11"
+        run_dir.mkdir(parents=True)
+        db_path = run_dir / "kernup.db"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE runs (
+                    id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL DEFAULT '',
+                    timestamp TEXT,
+                    generation INTEGER,
+                    block_size INTEGER,
+                    num_warps INTEGER,
+                    num_stages INTEGER,
+                    kv_strategy TEXT,
+                    split_k INTEGER,
+                    mutation_type TEXT
+                );
+                CREATE TABLE results (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    tok_s REAL,
+                    ttft_ms REAL,
+                    latency_ms REAL,
+                    vram_used_gb REAL,
+                    is_best INTEGER,
+                    notes TEXT
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO runs (id, model_id, timestamp, generation, block_size, num_warps, num_stages, kv_strategy, split_k, mutation_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_20260306_000012_speed11",
+                    "Qwen/Qwen2.5-7B",
+                    "2026-03-06T00:00:00+00:00",
+                    2,
+                    0,
+                    0,
+                    0,
+                    "n/a",
+                    0,
+                    "phase1",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO results (id, run_id, tok_s, ttft_ms, latency_ms, vram_used_gb, is_best, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid4()), "run_20260306_000012_speed11", 10.0, 200.0, 100.0, 5.0, 0, "gen=0"),
+            )
+            conn.execute(
+                """
+                INSERT INTO results (id, run_id, tok_s, ttft_ms, latency_ms, vram_used_gb, is_best, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid4()), "run_20260306_000012_speed11", 15.0, 150.0, 70.0, 5.2, 1, "gen=2"),
+            )
+            conn.commit()
+
+        result = runner.invoke(
+            cli,
+            [
+                "bench",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--results",
+                "./kernup_results",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Best tok/s: 15.000" in result.output
+        assert "Baseline tok/s: 10.000 (generation:0)" in result.output
+        assert "Speedup vs baseline: 1.500x" in result.output
 
 
 def test_patch_and_bench_block_model_mismatch() -> None:

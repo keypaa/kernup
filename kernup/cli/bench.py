@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import re
 import sqlite3
 
 import click
@@ -67,6 +68,54 @@ def _run_model_id(db_path: Path, run_id: str) -> str | None:
     return str(row[0]) if row[0] is not None else None
 
 
+def _extract_generation(notes: str) -> int | None:
+    match_phase2 = re.search(r"phase2_gen=(\d+)", notes)
+    if match_phase2:
+        return int(match_phase2.group(1))
+
+    match_phase1 = re.search(r"(?<!phase2_)gen=(\d+)", notes)
+    if match_phase1:
+        return int(match_phase1.group(1))
+    return None
+
+
+def _baseline_from_results(db_path: Path) -> tuple[float | None, str]:
+    if not db_path.exists():
+        return None, "none"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(
+            """
+            SELECT tok_s, notes
+            FROM results
+            ORDER BY rowid ASC
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return None, "none"
+
+    by_generation: dict[int, list[float]] = {}
+    for row in rows:
+        tok_s = float(row[0])
+        notes = str(row[1]) if row[1] is not None else ""
+        generation = _extract_generation(notes)
+        if generation is None:
+            continue
+        by_generation.setdefault(generation, []).append(tok_s)
+
+    if by_generation:
+        first_generation = min(by_generation)
+        baseline_tok_s = max(by_generation[first_generation])
+        return baseline_tok_s, f"generation:{first_generation}"
+
+    # Fallback for legacy rows without generation notes.
+    return float(rows[0][0]), "first-row"
+
+
 @click.command("bench")
 @click.option("--hf", "hf_model", required=True, help="HuggingFace model id.")
 @click.option("--results", "results_dir", default="./kernup_results", show_default=True)
@@ -83,6 +132,12 @@ def _run_model_id(db_path: Path, run_id: str) -> str | None:
 @click.option("--max-new-tokens", default=32, show_default=True, type=int)
 @click.option("--warmup-runs", default=1, show_default=True, type=int)
 @click.option("--measure-runs", default=2, show_default=True, type=int)
+@click.option(
+    "--baseline-tok-s",
+    default=None,
+    type=float,
+    help="Optional baseline throughput override for speedup computation.",
+)
 @click.option("--export", is_flag=True, default=False, help="Export benchmark summary as JSON.")
 @click.option("--output", "output_dir", default="./kernup_results", show_default=True)
 @click.option(
@@ -101,6 +156,7 @@ def bench_command(
     max_new_tokens: int,
     warmup_runs: int,
     measure_runs: int,
+    baseline_tok_s: float | None,
     export: bool,
     output_dir: str,
     allow_model_mismatch: bool,
@@ -112,6 +168,11 @@ def bench_command(
         raise click.ClickException("--warmup-runs must be >= 0")
     if measure_runs <= 0:
         raise click.ClickException("--measure-runs must be greater than 0")
+
+    baseline_override = baseline_tok_s
+    baseline_source = "override" if baseline_override is not None else "computed"
+    if baseline_override is not None and baseline_override <= 0:
+        raise click.ClickException("--baseline-tok-s must be greater than 0")
 
     if real_run:
         try:
@@ -130,6 +191,9 @@ def bench_command(
         latency_ms = measured.latency_ms
         vram_used = measured.vram_used_gb
         run_id = "live"
+        baseline_tok_s = baseline_override if baseline_override is not None else tok_s
+        if baseline_override is None:
+            baseline_source = "live-self"
         click.echo("Real benchmark mode enabled.")
     else:
         run_dir = _latest_run_dir(Path(results_dir))
@@ -153,9 +217,17 @@ def bench_command(
                 )
             click.echo(f"Warning: model mismatch bypass enabled ({run_model} vs {hf_model}).")
 
-    # Baseline is placeholder until real profile baseline is persisted per run.
-    baseline_tok_s = 0.0
-    speedup = 0.0 if baseline_tok_s == 0 else tok_s / baseline_tok_s
+        if baseline_override is not None:
+            baseline_tok_s = baseline_override
+        else:
+            baseline_tok_s, baseline_source = _baseline_from_results(db_path)
+
+    if baseline_tok_s is None or baseline_tok_s <= 0:
+        speedup = 0.0
+        baseline_tok_s = 0.0
+        baseline_source = "missing"
+    else:
+        speedup = tok_s / baseline_tok_s
 
     click.echo(f"Model: {hf_model}")
     click.echo(f"Run: {run_id}")
@@ -165,6 +237,7 @@ def bench_command(
     click.echo(f"TTFT ms: {ttft_ms:.3f}")
     click.echo(f"Latency ms: {latency_ms:.3f}")
     click.echo(f"VRAM GB: {vram_used:.3f}")
+    click.echo(f"Baseline tok/s: {baseline_tok_s:.3f} ({baseline_source})")
     click.echo(f"Speedup vs baseline: {speedup:.3f}x")
 
     if export:
@@ -185,6 +258,7 @@ def bench_command(
                         "vram_used_gb": vram_used,
                     },
                     "baseline_tok_s": baseline_tok_s,
+                    "baseline_source": baseline_source,
                     "speedup": speedup,
                 },
                 indent=2,

@@ -35,6 +35,16 @@ from kernup.utils.runs import create_run_artifacts
 @click.option("--resume", is_flag=True, default=False, help="Resume from the latest run metadata.")
 @click.option("--dry-run", is_flag=True, default=False, help="Run synthetic phase 1 without GPU benchmarking.")
 @click.option(
+    "--prompt",
+    "prompt_text",
+    default="Write a short summary of GPU kernel optimization best practices.",
+    show_default=True,
+    help="Benchmark prompt used for real GPU timing.",
+)
+@click.option("--max-new-tokens", default=32, show_default=True, type=int)
+@click.option("--warmup-runs", default=1, show_default=True, type=int)
+@click.option("--measure-runs", default=2, show_default=True, type=int)
+@click.option(
     "--allow-no-gpu",
     is_flag=True,
     default=False,
@@ -57,19 +67,28 @@ def optimize_command(
     output: str,
     resume: bool,
     dry_run: bool,
+    prompt_text: str,
+    max_new_tokens: int,
+    warmup_runs: int,
+    measure_runs: int,
     allow_no_gpu: bool,
     allow_model_mismatch: bool,
 ) -> None:
     """Optimize a model using phase 1 search (dry-run supported)."""
-    if not dry_run:
-        raise click.ClickException(
-            "Full optimization is not implemented yet. Use --dry-run during bootstrap."
-        )
+    if max_new_tokens <= 0:
+        raise click.ClickException("--max-new-tokens must be greater than 0")
+    if warmup_runs < 0:
+        raise click.ClickException("--warmup-runs must be >= 0")
+    if measure_runs <= 0:
+        raise click.ClickException("--measure-runs must be greater than 0")
 
     try:
         gpu_status = ensure_gpu_available(allow_no_gpu=allow_no_gpu)
     except UserError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    if not dry_run and gpu_status.bypassed:
+        raise click.ClickException("Real optimization requires GPU; remove --allow-no-gpu.")
 
     if resume:
         results_root = Path(output)
@@ -121,21 +140,32 @@ def optimize_command(
     artifacts = create_run_artifacts(output)
     now_iso = datetime.now().astimezone().isoformat()
     cache_dir = artifacts.run_dir / ".triton_cache"
+    gpu_compute_capability = "dry-run"
+    if not dry_run:
+        import torch
+
+        major, minor = torch.cuda.get_device_capability(0)
+        gpu_compute_capability = f"sm_{major}{minor}"
 
     click.echo(f"Model: {hf_model}")
     click.echo(f"Target: {target}")
     click.echo(gpu_status.reason)
 
     if phase == "2":
-        click.echo("Running phase 2 dry-run evolution loop...")
+        click.echo("Running phase 2 dry-run evolution loop..." if dry_run else "Running phase 2 real evolution loop...")
         result = run_phase2_evolution(
             iterations=iterations,
             population=population,
             plateau_window=plateau_window,
             plateau_threshold=plateau_threshold,
             target=target,
-            dry_run=True,
+            dry_run=dry_run,
             max_healing_attempts=3,
+            hf_model=hf_model,
+            prompt_text=prompt_text,
+            max_new_tokens=max_new_tokens,
+            warmup_runs=warmup_runs,
+            measure_runs=measure_runs,
         )
 
         with open_connection(artifacts.db_path) as conn:
@@ -213,10 +243,10 @@ def optimize_command(
         click.echo(f"Best generation: {result.best.generation}")
         click.echo(f"Total evaluations: {len(result.evaluations)}")
         click.echo(f"Evolution artifact: {phase2_path}")
-        click.echo("Phase 2 dry-run complete.")
+        click.echo("Phase 2 dry-run complete." if dry_run else "Phase 2 real run complete.")
         return
 
-    click.echo("Running phase 1 dry-run search...")
+    click.echo("Running phase 1 dry-run search..." if dry_run else "Running phase 1 real search...")
 
     result = run_phase1_search(
         iterations=iterations,
@@ -225,8 +255,13 @@ def optimize_command(
         plateau_threshold=plateau_threshold,
         target=target,
         cache_dir=cache_dir,
-        gpu_compute_capability="dry-run",
-        dry_run=True,
+        gpu_compute_capability=gpu_compute_capability,
+        dry_run=dry_run,
+        hf_model=hf_model,
+        prompt_text=prompt_text,
+        max_new_tokens=max_new_tokens,
+        warmup_runs=warmup_runs,
+        measure_runs=measure_runs,
     )
 
     with open_connection(artifacts.db_path) as conn:
@@ -283,4 +318,4 @@ def optimize_command(
     click.echo(f"Best tok/s: {result.best.tok_s}")
     click.echo(f"Best config: {result.best.config}")
     click.echo(f"Progression: {progression_path}")
-    click.echo("Phase 1 dry-run complete.")
+    click.echo("Phase 1 dry-run complete." if dry_run else "Phase 1 real run complete.")

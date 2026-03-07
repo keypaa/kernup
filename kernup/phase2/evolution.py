@@ -43,6 +43,11 @@ def run_phase2_evolution(
     target: str,
     dry_run: bool,
     max_healing_attempts: int = 3,
+    hf_model: str = "",
+    prompt_text: str = "Write a short summary of GPU kernel optimization best practices.",
+    max_new_tokens: int = 32,
+    warmup_runs: int = 1,
+    measure_runs: int = 2,
     seed: int = 101,
 ) -> Phase2EvolutionResult:
     rng = random.Random(seed)
@@ -75,6 +80,11 @@ def run_phase2_evolution(
             target=target,
             dry_run=dry_run,
             max_healing_attempts=max_healing_attempts,
+            hf_model=hf_model,
+            prompt_text=prompt_text,
+            max_new_tokens=max_new_tokens,
+            warmup_runs=warmup_runs,
+            measure_runs=measure_runs,
         )
         evaluations.append(Phase2Evaluation(generation=0, mutation_type=mutation, pipeline=pipeline))
 
@@ -102,6 +112,11 @@ def run_phase2_evolution(
                 target=target,
                 dry_run=dry_run,
                 max_healing_attempts=max_healing_attempts,
+                hf_model=hf_model,
+                prompt_text=prompt_text,
+                max_new_tokens=max_new_tokens,
+                warmup_runs=warmup_runs,
+                measure_runs=measure_runs,
             )
             current = Phase2Evaluation(generation=gen, mutation_type=mutation, pipeline=pipeline)
             evaluations.append(current)

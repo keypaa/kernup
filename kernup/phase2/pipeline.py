@@ -24,6 +24,11 @@ def run_phase2_validation_pipeline(
     target: str,
     dry_run: bool,
     max_healing_attempts: int = 3,
+    hf_model: str = "",
+    prompt_text: str = "Write a short summary of GPU kernel optimization best practices.",
+    max_new_tokens: int = 32,
+    warmup_runs: int = 1,
+    measure_runs: int = 2,
 ) -> Phase2PipelineResult:
     """Run static -> numerical -> benchmark gates with self-healing."""
 
@@ -70,7 +75,16 @@ def run_phase2_validation_pipeline(
             final_code=final_attempt.code,
         )
 
-    bench_result = benchmark_kernel(kernel_code=final_attempt.code, target=target, dry_run=dry_run)
+    bench_result = benchmark_kernel(
+        kernel_code=final_attempt.code,
+        target=target,
+        dry_run=dry_run,
+        hf_model=hf_model,
+        prompt_text=prompt_text,
+        max_new_tokens=max_new_tokens,
+        warmup_runs=warmup_runs,
+        measure_runs=measure_runs,
+    )
     return Phase2PipelineResult(
         static=static_result,
         numerical=numerical_result,

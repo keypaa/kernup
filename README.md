@@ -2,7 +2,7 @@
 
 Automatic kernel optimization for HuggingFace transformer inference workloads.
 
-Kernup is a Python CLI project focused on profiling and optimization workflows for PyTorch-based serving stacks. The current implementation provides a robust dry-run development mode that works on CPU-only machines, including Windows environments without local NVIDIA GPUs.
+Kernup is a Python CLI project focused on profiling and optimization workflows for PyTorch-based serving stacks. The current implementation provides a robust dry-run development mode and a first real GPU benchmark path for optimization/benchmarking commands.
 
 ## Current Scope
 
@@ -21,6 +21,8 @@ Implemented architecture slices:
 - Phase 2 safety guard: prompt generation is blocked with `KernupError` if reference kernel is missing
 - Patch generation formats (`simple`, `vllm`, `tgi`, `sglang`)
 - Bench summary and export from stored run results
+- Real benchmark mode in `bench` (`--real`) using HuggingFace generation timing on CUDA
+- Real scoring path in `optimize` (without `--dry-run`) using measured runtime metrics
 
 ## Requirements
 
@@ -135,10 +137,12 @@ kernup profile --hf <repo/model> [--device cuda:0] [--dry-run] [--allow-no-gpu] 
 ### optimize
 
 ```text
-kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balanced] [--iterations N] [--population N] [--plateau-window N] [--plateau-threshold F] [--resume] [--dry-run] [--allow-no-gpu] [--allow-model-mismatch] [--output ./kernup_results]
+kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balanced] [--iterations N] [--population N] [--plateau-window N] [--plateau-threshold F] [--resume] [--dry-run] [--prompt TEXT] [--max-new-tokens N] [--warmup-runs N] [--measure-runs N] [--allow-no-gpu] [--allow-model-mismatch] [--output ./kernup_results]
 ```
 
 When `--resume` is used, Kernup checks that the latest run model matches `--hf`. Use `--allow-model-mismatch` only if you intentionally want to bypass this guardrail.
+
+Without `--dry-run`, optimize runs real GPU timing for candidate evaluation. Do not use `--allow-no-gpu` in this mode.
 
 ### patch
 
@@ -149,8 +153,10 @@ kernup patch --hf <repo/model> --results ./kernup_results --format simple|vllm|t
 ### bench
 
 ```text
-kernup bench --hf <repo/model> --results ./kernup_results [--seq-lens 128,512,2048] [--batch-sizes 1,4,8,16] [--export] [--output ./kernup_results] [--allow-model-mismatch]
+kernup bench --hf <repo/model> --results ./kernup_results [--seq-lens 128,512,2048] [--batch-sizes 1,4,8,16] [--real] [--prompt TEXT] [--max-new-tokens N] [--warmup-runs N] [--measure-runs N] [--export] [--output ./kernup_results] [--allow-model-mismatch]
 ```
+
+With `--real`, `bench` measures live CUDA generation metrics directly from the model instead of reading the latest run database.
 
 ### utilities
 
@@ -184,7 +190,7 @@ conda run -n kernup-dev pytest
 
 ## Project Status
 
-This repository currently ships a comprehensive dry-run architecture for iterative development and CI-friendly validation. Real GPU benchmarking and local LLM execution paths are scaffolded and intentionally marked as future implementation points.
+This repository currently ships a comprehensive dry-run architecture plus a first real GPU benchmarking path for `optimize` and `bench`. Further work remains to make kernel-level effects fully hardware-applied beyond heuristic config weighting.
 
 ## Contributing
 

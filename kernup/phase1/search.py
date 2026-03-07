@@ -48,6 +48,11 @@ def run_phase1_search(
     cache_dir: Path,
     gpu_compute_capability: str,
     dry_run: bool,
+    hf_model: str = "",
+    prompt_text: str = "Write a short summary of GPU kernel optimization best practices.",
+    max_new_tokens: int = 32,
+    warmup_runs: int = 1,
+    measure_runs: int = 2,
     seed: int = 42,
 ) -> Phase1SearchResult:
     rng = random.Random(seed)
@@ -63,6 +68,11 @@ def run_phase1_search(
             target=target,
             gpu_compute_capability=gpu_compute_capability,
             dry_run=dry_run,
+            hf_model=hf_model,
+            prompt_text=prompt_text,
+            max_new_tokens=max_new_tokens,
+            warmup_runs=warmup_runs,
+            measure_runs=measure_runs,
         )
         scored.append((cfg, score))
         evaluations.append(score)
@@ -87,6 +97,11 @@ def run_phase1_search(
                 target=target,
                 gpu_compute_capability=gpu_compute_capability,
                 dry_run=dry_run,
+                hf_model=hf_model,
+                prompt_text=prompt_text,
+                max_new_tokens=max_new_tokens,
+                warmup_runs=warmup_runs,
+                measure_runs=measure_runs,
             )
             scored.append((cfg, score))
             evaluations.append(score)

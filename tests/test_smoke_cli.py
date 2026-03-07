@@ -3,6 +3,7 @@ from pathlib import Path
 import sqlite3
 from uuid import uuid4
 
+from kernup.benchmark.runtime import RuntimeBenchmarkResult
 from kernup.cli.main import cli
 from kernup.storage.db import ResultRecord, RunRecord, create_schema, insert_result, insert_run, list_results_for_run, open_connection
 
@@ -168,6 +169,24 @@ def test_optimize_phase2_dry_run_succeeds() -> None:
         assert "Phase 2 dry-run complete" in result.output
         assert "Evolution artifact:" in result.output
         assert "Best tok/s:" in result.output
+
+
+def test_optimize_real_run_rejects_gpu_bypass() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "optimize",
+            "--hf",
+            "Qwen/Qwen2.5-7B",
+            "--phase",
+            "1",
+            "--allow-no-gpu",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Real optimization requires GPU" in result.output
 
 
 def test_status_and_clean_commands() -> None:
@@ -350,6 +369,29 @@ def test_patch_and_bench_commands() -> None:
         assert "Export:" in bench_result.output
         bench_exports = list(Path("bench_out").glob("bench_run_20260306_000003_xyz987.json"))
         assert len(bench_exports) == 1
+
+
+def test_bench_real_mode_prints_measured_metrics(monkeypatch) -> None:
+    runner = CliRunner()
+
+    def _fake_benchmark(**_kwargs):
+        return RuntimeBenchmarkResult(tok_s=77.7, latency_ms=11.2, ttft_ms=88.1, vram_used_gb=6.4)
+
+    monkeypatch.setattr("kernup.cli.bench.benchmark_hf_model", _fake_benchmark)
+
+    result = runner.invoke(
+        cli,
+        [
+            "bench",
+            "--hf",
+            "Qwen/Qwen2.5-7B",
+            "--real",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Real benchmark mode enabled." in result.output
+    assert "Best tok/s: 77.700" in result.output
 
 
 def test_patch_and_bench_block_model_mismatch() -> None:

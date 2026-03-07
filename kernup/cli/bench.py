@@ -8,6 +8,8 @@ import sqlite3
 
 import click
 
+from kernup.benchmark.runtime import benchmark_hf_model
+
 
 def _latest_run_dir(results_dir: Path) -> Path:
     runs = sorted([p for p in results_dir.glob("run_*") if p.is_dir()])
@@ -69,6 +71,17 @@ def _run_model_id(db_path: Path, run_id: str) -> str | None:
 @click.option("--results", "results_dir", default="./kernup_results", show_default=True)
 @click.option("--seq-lens", default="128,512,2048", show_default=True)
 @click.option("--batch-sizes", default="1,4,8,16", show_default=True)
+@click.option("--real", "real_run", is_flag=True, default=False, help="Run real GPU benchmark now.")
+@click.option(
+    "--prompt",
+    "prompt_text",
+    default="Write a short summary of GPU kernel optimization best practices.",
+    show_default=True,
+    help="Benchmark prompt used for real GPU timing.",
+)
+@click.option("--max-new-tokens", default=32, show_default=True, type=int)
+@click.option("--warmup-runs", default=1, show_default=True, type=int)
+@click.option("--measure-runs", default=2, show_default=True, type=int)
 @click.option("--export", is_flag=True, default=False, help="Export benchmark summary as JSON.")
 @click.option("--output", "output_dir", default="./kernup_results", show_default=True)
 @click.option(
@@ -82,31 +95,62 @@ def bench_command(
     results_dir: str,
     seq_lens: str,
     batch_sizes: str,
+    real_run: bool,
+    prompt_text: str,
+    max_new_tokens: int,
+    warmup_runs: int,
+    measure_runs: int,
     export: bool,
     output_dir: str,
     allow_model_mismatch: bool,
 ) -> None:
     """Show benchmark-style summary for the latest run."""
-    run_dir = _latest_run_dir(Path(results_dir))
-    run_id = run_dir.name
-    db_path = run_dir / "kernup.db"
-    tok_s, ttft_ms, latency_ms, vram_used = _best_row(db_path)
-    run_model = _run_model_id(db_path, run_id)
+    if max_new_tokens <= 0:
+        raise click.ClickException("--max-new-tokens must be greater than 0")
+    if warmup_runs < 0:
+        raise click.ClickException("--warmup-runs must be >= 0")
+    if measure_runs <= 0:
+        raise click.ClickException("--measure-runs must be greater than 0")
 
-    if run_model is None:
-        if not allow_model_mismatch:
-            raise click.ClickException(
-                "Run model metadata is missing. Re-run profile/optimize with current schema, "
-                "or pass --allow-model-mismatch to bypass this check."
+    if real_run:
+        try:
+            measured = benchmark_hf_model(
+                hf_model=hf_model,
+                prompt_text=prompt_text,
+                max_new_tokens=max_new_tokens,
+                warmup_runs=warmup_runs,
+                measure_runs=measure_runs,
             )
-        click.echo("Warning: run model metadata missing, bypass enabled.")
-    elif run_model != hf_model:
-        if not allow_model_mismatch:
-            raise click.ClickException(
-                f"Model mismatch: run uses '{run_model}' but --hf is '{hf_model}'. "
-                "Pass --allow-model-mismatch to force bench summary."
-            )
-        click.echo(f"Warning: model mismatch bypass enabled ({run_model} vs {hf_model}).")
+        except Exception as exc:
+            raise click.ClickException(f"Real benchmark failed: {exc}") from exc
+
+        tok_s = measured.tok_s
+        ttft_ms = measured.ttft_ms
+        latency_ms = measured.latency_ms
+        vram_used = measured.vram_used_gb
+        run_id = "live"
+        click.echo("Real benchmark mode enabled.")
+    else:
+        run_dir = _latest_run_dir(Path(results_dir))
+        run_id = run_dir.name
+        db_path = run_dir / "kernup.db"
+        tok_s, ttft_ms, latency_ms, vram_used = _best_row(db_path)
+        run_model = _run_model_id(db_path, run_id)
+
+        if run_model is None:
+            if not allow_model_mismatch:
+                raise click.ClickException(
+                    "Run model metadata is missing. Re-run profile/optimize with current schema, "
+                    "or pass --allow-model-mismatch to bypass this check."
+                )
+            click.echo("Warning: run model metadata missing, bypass enabled.")
+        elif run_model != hf_model:
+            if not allow_model_mismatch:
+                raise click.ClickException(
+                    f"Model mismatch: run uses '{run_model}' but --hf is '{hf_model}'. "
+                    "Pass --allow-model-mismatch to force bench summary."
+                )
+            click.echo(f"Warning: model mismatch bypass enabled ({run_model} vs {hf_model}).")
 
     # Baseline is placeholder until real profile baseline is persisted per run.
     baseline_tok_s = 0.0

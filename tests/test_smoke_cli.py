@@ -452,6 +452,102 @@ def test_patch_smoke_succeeds_for_simple_patch() -> None:
         assert "Smoke:" in patch_result.output
 
 
+def test_patch_and_bench_ignore_incomplete_latest_run() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        valid_run = Path("kernup_results") / "run_20260306_000010_valid11"
+        valid_run.mkdir(parents=True)
+        db_path = valid_run / "kernup.db"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE runs (
+                    id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL DEFAULT '',
+                    timestamp TEXT,
+                    generation INTEGER,
+                    block_size INTEGER,
+                    num_warps INTEGER,
+                    num_stages INTEGER,
+                    kv_strategy TEXT,
+                    split_k INTEGER,
+                    mutation_type TEXT
+                );
+                CREATE TABLE results (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    tok_s REAL,
+                    ttft_ms REAL,
+                    latency_ms REAL,
+                    vram_used_gb REAL,
+                    is_best INTEGER,
+                    notes TEXT
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO runs (id, model_id, timestamp, generation, block_size, num_warps, num_stages, kv_strategy, split_k, mutation_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "run_20260306_000010_valid11",
+                    "Qwen/Qwen2.5-7B",
+                    "2026-03-06T00:00:00+00:00",
+                    0,
+                    0,
+                    0,
+                    0,
+                    "n/a",
+                    0,
+                    "dry-run",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO results (id, run_id, tok_s, ttft_ms, latency_ms, vram_used_gb, is_best, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid4()), "run_20260306_000010_valid11", 17.5, 88.0, 33.0, 5.4, 1, "best"),
+            )
+            conn.commit()
+
+        # Create a newer incomplete run directory (no DB) to simulate interrupted job.
+        incomplete = Path("kernup_results") / "run_20260306_000011_incomp1"
+        incomplete.mkdir(parents=True)
+
+        patch_result = runner.invoke(
+            cli,
+            [
+                "patch",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--results",
+                "./kernup_results",
+                "--format",
+                "simple",
+                "--output",
+                "./patch_out",
+            ],
+        )
+        assert patch_result.exit_code == 0
+        assert "run_20260306_000010_valid11" in patch_result.output
+
+        bench_result = runner.invoke(
+            cli,
+            [
+                "bench",
+                "--hf",
+                "Qwen/Qwen2.5-7B",
+                "--results",
+                "./kernup_results",
+            ],
+        )
+        assert bench_result.exit_code == 0
+        assert "Run: run_20260306_000010_valid11" in bench_result.output
+
+
 def test_optimize_resume_reuses_latest_run_and_offsets_generations() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():

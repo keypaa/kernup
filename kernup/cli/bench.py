@@ -9,13 +9,14 @@ import sqlite3
 import click
 
 from kernup.benchmark.runtime import benchmark_hf_model
+from kernup.utils.runs import latest_run_dir
 
 
 def _latest_run_dir(results_dir: Path) -> Path:
-    runs = sorted([p for p in results_dir.glob("run_*") if p.is_dir()])
-    if not runs:
+    run_dir = latest_run_dir(results_dir, require_db=True)
+    if run_dir is None:
         raise click.ClickException(f"No run folders found under {results_dir}")
-    return runs[-1]
+    return run_dir
 
 
 def _best_row(db_path: Path) -> tuple[float, float, float, float]:

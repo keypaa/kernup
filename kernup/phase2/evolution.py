@@ -52,7 +52,13 @@ def run_phase2_evolution(
     seed: int = 101,
 ) -> Phase2EvolutionResult:
     rng = random.Random(seed)
-    generator = KernelGenerator(dry_run=dry_run, seed=seed)
+    generator = KernelGenerator(
+        dry_run=dry_run,
+        seed=seed,
+        hf_model=hf_model,
+        prompt_text=prompt_text,
+        generation_max_new_tokens=max(64, max_new_tokens),
+    )
 
     mutation_weights = [0.6, 0.3, 0.1]
     mutation_labels = ["light", "medium", "heavy"]

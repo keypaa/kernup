@@ -21,7 +21,7 @@ dependencies = [
 gpu = [
   "torch>=2.6",
   "triton>=3.1,<4.0",
-  "transformers>=4.40",
+  "transformers>=5.3.0",
   "matplotlib>=3.8",
   "optuna>=3.6"
 ]

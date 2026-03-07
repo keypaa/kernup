@@ -16,12 +16,7 @@ from kernup.phase1.search import run_phase1_search
 from kernup.phase2.evolution import run_phase2_evolution
 from kernup.storage.db import ResultRecord, RunRecord, create_schema, insert_result, open_connection, upsert_run
 from kernup.utils.gpu import ensure_gpu_available
-from kernup.utils.runs import create_run_artifacts
-
-
-def _latest_run_dir(results_root: Path) -> Path | None:
-    runs = sorted([p for p in results_root.glob("run_*") if p.is_dir()])
-    return runs[-1] if runs else None
+from kernup.utils.runs import create_run_artifacts, latest_run_dir
 
 
 def _read_run_model(db_path: Path, run_id: str) -> str | None:
@@ -168,7 +163,7 @@ def optimize_command(
     start_generation = 0
 
     if resume:
-        latest = _latest_run_dir(results_root)
+        latest = latest_run_dir(results_root, require_db=True)
         if latest is None:
             raise click.ClickException(
                 f"--resume requested but no runs found under {results_root}"

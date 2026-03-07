@@ -37,3 +37,23 @@ def create_run_artifacts(output_root: str | Path, run_id: str | None = None) -> 
         log_path=run_dir / "kernup.log",
         profile_path=run_dir / "profile.json",
     )
+
+
+def list_run_dirs(results_root: str | Path, require_db: bool = False) -> list[Path]:
+    """List run directories sorted by name, optionally requiring a database file."""
+    root = Path(results_root)
+    if not root.exists():
+        return []
+
+    runs = sorted([p for p in root.glob("run_*") if p.is_dir()])
+    if not require_db:
+        return runs
+    return [run_dir for run_dir in runs if (run_dir / "kernup.db").exists()]
+
+
+def latest_run_dir(results_root: str | Path, require_db: bool = False) -> Path | None:
+    """Return the latest run directory, or None when no matching run exists."""
+    runs = list_run_dirs(results_root, require_db=require_db)
+    if not runs:
+        return None
+    return runs[-1]

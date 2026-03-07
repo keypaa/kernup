@@ -31,3 +31,28 @@ def test_phase2_evolution_dry_run_returns_best_and_history() -> None:
     assert len(result.history_best_tok_s) >= 1
     assert result.best.pipeline.benchmark is not None
     assert result.best.pipeline.benchmark.tok_s > 0
+
+
+def test_generator_real_mode_falls_back_when_model_generation_fails(monkeypatch) -> None:
+    generator = KernelGenerator(
+        dry_run=False,
+        seed=7,
+        hf_model="Qwen/Qwen2.5-7B",
+        prompt_text="test",
+    )
+
+    def _fail(_request):
+        raise RuntimeError("forced failure")
+
+    monkeypatch.setattr(generator, "_generate_with_model", _fail)
+
+    code = generator.generate(
+        GenerationRequest(
+            reference_kernel="import triton\n\n@triton.jit\ndef seed(x):\n    return x\n",
+            previous_best_kernel="import triton\n\n@triton.jit\ndef best(x):\n    return x\n",
+            mutation_type="medium",
+            generation=2,
+        )
+    )
+    assert "import triton" in code
+    assert "@triton.jit" in code

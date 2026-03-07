@@ -47,7 +47,7 @@ def get_hf_model_bundle(hf_model: str) -> HFModelBundle:
 
     model = AutoModelForCausalLM.from_pretrained(
         hf_model,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
         device_map=device,
     )
     model.eval()

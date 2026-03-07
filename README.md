@@ -35,6 +35,7 @@ Implemented architecture slices:
   - NVIDIA GPU
   - PyTorch + CUDA
   - Triton
+  - transformers >= 5.3.0 (required for newer model types like qwen3_5)
 
 ## Installation
 
@@ -171,6 +172,8 @@ kernup clean --results ./kernup_results [--yes]
 ```
 
 `status` displays the run model id and can be filtered by model with `--hf`.
+
+`patch`, `bench`, and `optimize --resume` automatically ignore incomplete run folders that do not contain `kernup.db` (for example after an interrupted session).
 
 ## Output Structure
 

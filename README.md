@@ -106,11 +106,15 @@ kernup optimize --hf Qwen/Qwen2.5-7B --phase 2 --dry-run --allow-no-gpu --iterat
 kernup patch --hf Qwen/Qwen2.5-7B --results ./kernup_results --format simple --output ./patch_out
 ```
 
+`patch` validates that the selected run model matches `--hf`. Use `--allow-model-mismatch` only if you intentionally want to bypass this safeguard.
+
 5. Generate benchmark-style summary export.
 
 ```powershell
 kernup bench --hf Qwen/Qwen2.5-7B --results ./kernup_results --export --output ./kernup_results
 ```
+
+`bench` applies the same model consistency check and supports `--allow-model-mismatch` for explicit override.
 
 ### Quickstart B: one-command smoke check script (Windows)
 
@@ -137,13 +141,13 @@ kernup optimize --hf <repo/model> --phase 1|2 [--target throughput|latency|balan
 ### patch
 
 ```text
-kernup patch --hf <repo/model> --results ./kernup_results --format simple|vllm|tgi|sglang --output ./patch
+kernup patch --hf <repo/model> --results ./kernup_results --format simple|vllm|tgi|sglang --output ./patch [--allow-model-mismatch]
 ```
 
 ### bench
 
 ```text
-kernup bench --hf <repo/model> --results ./kernup_results [--seq-lens 128,512,2048] [--batch-sizes 1,4,8,16] [--export] [--output ./kernup_results]
+kernup bench --hf <repo/model> --results ./kernup_results [--seq-lens 128,512,2048] [--batch-sizes 1,4,8,16] [--export] [--output ./kernup_results] [--allow-model-mismatch]
 ```
 
 ### utilities

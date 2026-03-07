@@ -38,6 +38,32 @@ def _best_row(db_path: Path) -> tuple[float, float, float, float]:
     return float(row[0]), float(row[1]), float(row[2]), float(row[3])
 
 
+def _run_model_id(db_path: Path, run_id: str) -> str | None:
+    if not db_path.exists():
+        raise click.ClickException(f"Missing database at {db_path}")
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        try:
+            row = conn.execute(
+                """
+                SELECT model_id
+                FROM runs
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return str(row[0]) if row[0] is not None else None
+
+
 @click.command("bench")
 @click.option("--hf", "hf_model", required=True, help="HuggingFace model id.")
 @click.option("--results", "results_dir", default="./kernup_results", show_default=True)
@@ -45,6 +71,12 @@ def _best_row(db_path: Path) -> tuple[float, float, float, float]:
 @click.option("--batch-sizes", default="1,4,8,16", show_default=True)
 @click.option("--export", is_flag=True, default=False, help="Export benchmark summary as JSON.")
 @click.option("--output", "output_dir", default="./kernup_results", show_default=True)
+@click.option(
+    "--allow-model-mismatch",
+    is_flag=True,
+    default=False,
+    help="Allow benchmark summary even when the run model id differs from --hf.",
+)
 def bench_command(
     hf_model: str,
     results_dir: str,
@@ -52,11 +84,29 @@ def bench_command(
     batch_sizes: str,
     export: bool,
     output_dir: str,
+    allow_model_mismatch: bool,
 ) -> None:
     """Show benchmark-style summary for the latest run."""
     run_dir = _latest_run_dir(Path(results_dir))
     run_id = run_dir.name
-    tok_s, ttft_ms, latency_ms, vram_used = _best_row(run_dir / "kernup.db")
+    db_path = run_dir / "kernup.db"
+    tok_s, ttft_ms, latency_ms, vram_used = _best_row(db_path)
+    run_model = _run_model_id(db_path, run_id)
+
+    if run_model is None:
+        if not allow_model_mismatch:
+            raise click.ClickException(
+                "Run model metadata is missing. Re-run profile/optimize with current schema, "
+                "or pass --allow-model-mismatch to bypass this check."
+            )
+        click.echo("Warning: run model metadata missing, bypass enabled.")
+    elif run_model != hf_model:
+        if not allow_model_mismatch:
+            raise click.ClickException(
+                f"Model mismatch: run uses '{run_model}' but --hf is '{hf_model}'. "
+                "Pass --allow-model-mismatch to force bench summary."
+            )
+        click.echo(f"Warning: model mismatch bypass enabled ({run_model} vs {hf_model}).")
 
     # Baseline is placeholder until real profile baseline is persisted per run.
     baseline_tok_s = 0.0

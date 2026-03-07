@@ -11,7 +11,7 @@ def export_results_json(conn: sqlite3.Connection, run_id: str, output_path: str 
     """Export all rows for a run id to a JSON file."""
     run_row = conn.execute(
         """
-        SELECT id, timestamp, generation, block_size, num_warps, num_stages, kv_strategy,
+        SELECT id, model_id, timestamp, generation, block_size, num_warps, num_stages, kv_strategy,
                split_k, mutation_type
         FROM runs
         WHERE id = ?

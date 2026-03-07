@@ -10,6 +10,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class RunRecord:
     id: str
+    model_id: str
     timestamp: str
     generation: int
     block_size: int
@@ -45,6 +46,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS runs (
             id            TEXT PRIMARY KEY,
+            model_id      TEXT NOT NULL DEFAULT '',
             timestamp     TEXT NOT NULL,
             generation    INTEGER NOT NULL,
             block_size    INTEGER NOT NULL,
@@ -68,18 +70,25 @@ def create_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+
+    # Backward-compatible migration for existing databases created before model_id was introduced.
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()]
+    if "model_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN model_id TEXT NOT NULL DEFAULT ''")
+
     conn.commit()
 
 
 def insert_run(conn: sqlite3.Connection, record: RunRecord) -> None:
     conn.execute(
         """
-        INSERT INTO runs (id, timestamp, generation, block_size, num_warps, num_stages,
+        INSERT INTO runs (id, model_id, timestamp, generation, block_size, num_warps, num_stages,
                           kv_strategy, split_k, mutation_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             record.id,
+            record.model_id,
             record.timestamp,
             record.generation,
             record.block_size,

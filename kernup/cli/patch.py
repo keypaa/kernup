@@ -39,6 +39,32 @@ def _best_tok_s(db_path: Path) -> float:
     return float(row[0])
 
 
+def _run_model_id(db_path: Path, run_id: str) -> str | None:
+    if not db_path.exists():
+        raise click.ClickException(f"Missing database at {db_path}")
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        try:
+            row = conn.execute(
+                """
+                SELECT model_id
+                FROM runs
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return str(row[0]) if row[0] is not None else None
+
+
 @click.command("patch")
 @click.option("--hf", "hf_model", required=True, help="HuggingFace model id.")
 @click.option("--results", "results_dir", default="./kernup_results", show_default=True)
@@ -50,12 +76,41 @@ def _best_tok_s(db_path: Path) -> float:
     show_default=True,
 )
 @click.option("--output", "output_dir", default="./patch", show_default=True)
-def patch_command(hf_model: str, results_dir: str, patch_format: str, output_dir: str) -> None:
+@click.option(
+    "--allow-model-mismatch",
+    is_flag=True,
+    default=False,
+    help="Allow patch generation even when the run model id differs from --hf.",
+)
+def patch_command(
+    hf_model: str,
+    results_dir: str,
+    patch_format: str,
+    output_dir: str,
+    allow_model_mismatch: bool,
+) -> None:
     """Generate a patch artifact from the latest available run."""
     results_root = Path(results_dir)
     run_dir = _latest_run_dir(results_root)
     run_id = run_dir.name
-    tok_s = _best_tok_s(run_dir / "kernup.db")
+    db_path = run_dir / "kernup.db"
+    tok_s = _best_tok_s(db_path)
+    run_model = _run_model_id(db_path, run_id)
+
+    if run_model is None:
+        if not allow_model_mismatch:
+            raise click.ClickException(
+                "Run model metadata is missing. Re-run profile/optimize with current schema, "
+                "or pass --allow-model-mismatch to bypass this check."
+            )
+        click.echo("Warning: run model metadata missing, bypass enabled.")
+    elif run_model != hf_model:
+        if not allow_model_mismatch:
+            raise click.ClickException(
+                f"Model mismatch: run uses '{run_model}' but --hf is '{hf_model}'. "
+                "Pass --allow-model-mismatch to force patch generation."
+            )
+        click.echo(f"Warning: model mismatch bypass enabled ({run_model} vs {hf_model}).")
 
     renderers = {
         "simple": render_simple_patch,

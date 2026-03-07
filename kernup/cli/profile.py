@@ -59,6 +59,7 @@ def profile_command(
         now_iso = datetime.now().astimezone().isoformat()
         run_record = RunRecord(
             id=artifacts.run_id,
+            model_id=hf_model,
             timestamp=now_iso,
             generation=0,
             block_size=0,

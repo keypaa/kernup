@@ -85,6 +85,7 @@ def optimize_command(
             create_schema(conn)
             run_record = RunRecord(
                 id=artifacts.run_id,
+                model_id=hf_model,
                 timestamp=now_iso,
                 generation=len(result.history_best_tok_s) - 1,
                 block_size=0,
@@ -175,6 +176,7 @@ def optimize_command(
         create_schema(conn)
         run_record = RunRecord(
             id=artifacts.run_id,
+            model_id=hf_model,
             timestamp=now_iso,
             generation=len(result.history_best_tok_s) - 1,
             block_size=result.best_config.block_size,
